@@ -77,6 +77,7 @@ df_surveys <- df_surveys_raw %>%
 # filter efforts for proofed surveys and remove the test sites
 df_efforts <- df_efforts_raw %>% 
   filter(site.seq.no != 315) %>% 
+  filter(! is.na(target.species)) %>% 
   filter(survey.seq.no %in% df_surveys$survey.seq.no)
 
 # check unique survey IDS
@@ -87,14 +88,15 @@ length(unique(df_efforts$survey.seq.no))
 # Fetch fish raw data ----------------------------------------------------------
 
 # using efforts, download fish data 1000 efforts at a time
-vs <- unique(df_efforts_raw$visit.fish.seq.no)
+vs <- unique(df_efforts$visit.fish.seq.no)
 chunks <- split(vs, ceiling(seq_along(vs)/1000))
 
 get_fmdb_fishraw(visit_seq = chunks[[1]][1])
+
 chunks[[1]][1] %>% map_df(~get_fmdb_fishraw(visit_seq = .))
 
 system.time(
-  df_fishraw <- chunks[[1]] %>% map_df(~get_fmdb_fishraw(visit_seq = .))
+  df_fishraw <- vs[1:1001] %>% map_df(~get_fmdb_fishraw(visit_seq = .))
 )
 
 # Check records

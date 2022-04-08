@@ -91,9 +91,10 @@ vs <- unique(df_efforts_raw$visit.fish.seq.no)
 chunks <- split(vs, ceiling(seq_along(vs)/1000))
 
 get_fmdb_fishraw(visit_seq = chunks[[1]][1])
+chunks[[1]][1] %>% map_df(~get_fmdb_fishraw(visit_seq = .))
 
 system.time(
-  df_fishraw <- vs[1:2] %>% map_df(~get_fmdb_fishraw(visit_seq = .))
+  df_fishraw <- chunks[[1]] %>% map_df(~get_fmdb_fishraw(visit_seq = .))
 )
 
 # Check records

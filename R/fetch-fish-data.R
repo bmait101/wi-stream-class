@@ -12,7 +12,7 @@ library(wdnr.fmdb)  # internal WDNR package
 
 yrs <- 1994:2021
 
-waterbody_types <- c("wadable_stream", "non-wadable_stream")
+waterbody_types <- c("wadable_stream", "non-wadable_stream", "streams")
 
 target_survey_statuses <- c(
   "data_entry_complete_and_proofed",
@@ -32,7 +32,7 @@ system.time(
       waterbody_type = waterbody_types
     ))
 )
-# 3.1 minutes
+# 3.4 minutes
 
 # save raw pull
 saveRDS(df_surveys_raw, here("data", "raw_surveys_20220408.rds"))
@@ -46,25 +46,24 @@ system.time(
       waterbody_type = waterbody_types
     ))
 )
-# 4.6 minutes
+# 4.9 minutes
 
 # save raw pull
 saveRDS(df_efforts_raw, here("data", "raw_efforts_20220408.rds"))
 # df_efforts_raw <- read_rds(here("data", "raw_efforts_20220408.rds"))
 
 
-# QAQC surveys and efforts  ----------------------------------------------------
 
-# CHECK: There should be fewer in the efforts tibble b/c net data not pulled:
-length(unique(df_surveys_raw$survey.seq.no))  
-length(unique(df_efforts_raw$survey.seq.no))  
+
+
+# Initial filters  ----------------------------------------------------
 
 # filter out surveys with no effort data and that are not proofed
 df_surveys <- df_surveys_raw %>% 
   semi_join(df_efforts_raw, by = "survey.seq.no") %>% 
   filter(survey.status %in% target_survey_statuses)
 
-# filter efforts for proofed shocking and remove the test sites
+# filter efforts for proofed surveys and remove the test sites
 df_efforts <- df_efforts_raw %>% 
   filter(site.seq.no != 315) %>% 
   filter(survey.seq.no %in% df_surveys$survey.seq.no)

@@ -46,9 +46,7 @@ tmp_lines <-
     dsn = path.24k,
     layer = "WD_HYDRO_FLOWLINE_LN_24K") %>%
   st_as_sf() %>%
-  janitor::clean_names() 
-
-tmp_lines <- tmp_lines %>%
+  janitor::clean_names() %>% 
   st_drop_geometry() %>%
   select(hydroid, hydrocode, hydrotype, wbic = river_sys_wbic) %>%
   as_tibble()
@@ -56,12 +54,10 @@ tmp_lines <- tmp_lines %>%
 # links wbics to the whd_lines lines
 whd_lines <- left_join(whd_lines, tmp_lines, by = "hydroid")
 
-# check for NAs
-map(tmp, ~sum(is.na(.)))
-# 244 reaches without WBICS
-
 # remove tmps
 rm(tmp_lines)
+
+saveRDS(whd_lines, here("data", "whd_lines.rds"))
 
 
 ### 24k WHD attribute data -----------------------------------------------------
@@ -72,9 +68,6 @@ rm(tmp_lines)
 # - trace (cumulative) riparian
 # - incremental watershed
 # - trace (cumulative) watershed
-
-# list layers again
-st_layers(dsn = path.24k.va)
 
 # list of layers to read in
 target_layers <- 
@@ -91,11 +84,11 @@ load_24k_data <- function(path, layer_name) {
     as_tibble()
 }
 
-# # test funtion
-# load_24k_data(path.24k.va, "WD_HYDRO_VA_ATTRIBUTE_INFO_REF")
-# 
-# # test mapping function over target layer names
-# target_layers[2] %>% map(~load_24k_data(path = path.24k.va, layer_name = .))
+# test function
+load_24k_data(path.24k.va, "WD_HYDRO_VA_ATTRIBUTE_INFO_REF")
+
+# test mapping function over target layer names
+target_layers[1] %>% map(~load_24k_data(path = path.24k.va, layer_name = .))
 
 # read the data into a nested dataframe
 whd_data <-
@@ -103,34 +96,35 @@ whd_data <-
   mutate(
     layer_data = map(
       layer, 
-      load_24k_data(path = path.24k.va, layer_name = .))
+      ~load_24k_data(path = path.24k.va, layer_name = .))
     )
 whd_data
 
+saveRDS(whd_data, here("data", "whd_data.rds"))
 
-### 24k WHD catchements (HUC16s) -----------------------------------------------
-
-whd_catchs <- load_24k_data(path.24k.va, "WD_HYDRO_VA_CATCHMENT_AR_24K")
-
-
-### Other layers ---------------------------------------------------------------
-
-#### Watersheds
-
-huc8 <- st_read(here("data","spatial","shapefiles","hucs","huc8.shp")) %>% 
-  clean_names() %>% st_transform(crs = 3071)
-huc10 <- st_read(here("data","spatial","shapefiles","hucs","huc10.shp")) %>% 
-  clean_names() %>% st_transform(crs = 3071)
-huc12 <- st_read(here("data","spatial","shapefiles","hucs","huc12.shp")) %>% 
-  clean_names() %>% st_transform(crs = 3071)
-ecoreg <- st_read(
-  here("data","spatial","shapefiles","ecoregions","wi_eco_l3.shp")) %>%
-  clean_names() %>% st_transform(crs = 3071)
-
-
-#### Wisconsin polygon
-wisco_border <- wdnr.gis::wi_poly %>% 
-  st_transform(crs = wi_crs) 
+# ### 24k WHD catchments (HUC16s) -----------------------------------------------
+# 
+# whd_catchs <- load_24k_data(path.24k.va, "WD_HYDRO_VA_CATCHMENT_AR_24K")
+# 
+# 
+# ### Other layers ---------------------------------------------------------------
+# 
+# #### Watersheds
+# 
+# huc8 <- st_read(here("data","spatial","shapefiles","hucs","huc8.shp")) %>% 
+#   clean_names() %>% st_transform(crs = 3071)
+# huc10 <- st_read(here("data","spatial","shapefiles","hucs","huc10.shp")) %>% 
+#   clean_names() %>% st_transform(crs = 3071)
+# huc12 <- st_read(here("data","spatial","shapefiles","hucs","huc12.shp")) %>% 
+#   clean_names() %>% st_transform(crs = 3071)
+# ecoreg <- st_read(
+#   here("data","spatial","shapefiles","ecoregions","wi_eco_l3.shp")) %>%
+#   clean_names() %>% st_transform(crs = 3071)
+# 
+# 
+# #### Wisconsin polygon
+# wisco_border <- wdnr.gis::wi_poly %>% 
+#   st_transform(crs = wi_crs) 
 
 
 

@@ -21,6 +21,18 @@ target_survey_statuses <- c(
   "historical_data_load_status_unknown"
   )
 
+target_gears <- c(
+  "stream_shocker", 
+  "backpack_shocker", 
+  "mini_boom_shocker", 
+  "boom_shocker", 
+  "hoop_net", 
+  "fyke_net", 
+  "mini_fyke_net", 
+  "bottom_gill_net",
+  "seine", 
+  "setline"
+)
 
 # Fetch surveys and efforts ----------------------------------------------------
 
@@ -38,21 +50,20 @@ system.time(
 saveRDS(df_surveys_raw, here("data", "raw_surveys_20220408.rds"))
 # df_surveys_raw <- read_rds(here("data", "raw_surveys_20220408.rds"))
 
-# Fetch efforts data from 1994-2021 on flowing water
+# Fetch efforts data from 1994-2021 on flowing water using target gears
 system.time(
   df_efforts_raw <- yrs %>%
     map_df(~get_fmdb_efforts(
       year = .,
-      waterbody_type = waterbody_types
+      waterbody_type = waterbody_types, 
+      gear = target_gears
     ))
 )
-# 4.9 minutes
+# 5 minutes
 
 # save raw pull
 saveRDS(df_efforts_raw, here("data", "raw_efforts_20220408.rds"))
 # df_efforts_raw <- read_rds(here("data", "raw_efforts_20220408.rds"))
-
-
 
 
 
@@ -79,14 +90,18 @@ length(unique(df_efforts$survey.seq.no))
 vs <- unique(df_efforts_raw$visit.fish.seq.no)
 chunks <- split(vs, ceiling(seq_along(vs)/1000))
 
-df_fishraw <- map_df(chunks ~get_fmdb_fishraw(visit_seq = .))
+get_fmdb_fishraw(visit_seq = chunks[[1]][1])
+
+system.time(
+  df_fishraw <- vs[1:2] %>% map_df(~get_fmdb_fishraw(visit_seq = .))
+)
 
 # Check records
 length_deleted_rows
 length_warning_rows
 
 # save
-saveRDS(df_fishraw, here("fmdb_fishdata_wadeableAndNonwadeable_20211006.rds"))
+saveRDS(df_fishraw, here(""))
 
 
 

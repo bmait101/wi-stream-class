@@ -7,17 +7,15 @@
 # Other shapefiles can be found at https://data-wi-dnr.opendata.arcgis.com/
 
 
-
 # libraries
 library(tidyverse)
 library(here)
 library(sf)
 
 # Set some paths and crs
-path.24k <- here("data","spatial","wdnr_24k_hydro.gdb")
-path.24k.va <- here("data","spatial","wdnr_24k_hydro_va.gdb")
+path.24k <- here("data","whd","wdnr_24k_hydro.gdb")
+path.24k.va <- here("data","whd","wdnr_24k_hydro_va.gdb")
 wi_crs <- 3071  # NAD83(HARN) / Wisconsin Transverse Mercator
-
 
 
 ## Data

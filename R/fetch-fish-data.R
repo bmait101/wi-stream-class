@@ -2,24 +2,28 @@
 # Bryan Maitland
 # April 2022
 
-library(tidyverse)
-library(here)
+
+# NOTES: 
+# - There is a 1000 records max request limit for pulls (server issue)
+# - Every pull results in a connection (which slows it all down)
+
+
+# Libraries
 library(wdnr.fmdb)  # internal WDNR package
 # wdnr.fmdb::set_fmdb_credentials()
 
 
-# Set some fetching and filtering parameters
+# Set parameters for data pull -------------------------------------------------
 
-yrs <- 1994:2021
+# Fetch all data from 1994-2021 on flowing water using target gears
 
-waterbody_types <- c("wadable_stream", "non-wadable_stream", "streams")
+yrs <- list(1994:1998, 1999:2003, 2004:2008, 2009:2013, 2014:2018, 2019:2021)
 
-target_survey_statuses <- c(
-  "data_entry_complete_and_proofed",
-  "historical_data_complete_and_proofed",
-  "historical_data_entry_complete",
-  "historical_data_load_status_unknown"
-  )
+waterbody_types <- c(
+  "wadable_stream", 
+  "non-wadable_stream", 
+  "streams"
+)
 
 target_gears <- c(
   "stream_shocker", 
@@ -34,79 +38,48 @@ target_gears <- c(
   "setline"
 )
 
-# Fetch surveys and efforts ----------------------------------------------------
+# Fetch data -------------------------------------------------------------------
 
-# Fetch survey data from 1994-2021 on flowing water
+# Survey data (42 seconds)
 system.time(
   df_surveys_raw <- yrs %>%
-    map_df(~get_fmdb_surveys(
+    purrr::map_df(~get_fmdb_surveys(
       year = .,
       waterbody_type = waterbody_types
     ))
 )
-# 3.4 minutes
 
-# save raw pull
-saveRDS(df_surveys_raw, here("data", "raw_surveys_20220408.rds"))
-# df_surveys_raw <- read_rds(here("data", "raw_surveys_20220408.rds"))
-
-# Fetch efforts data from 1994-2021 on flowing water using target gears
+# Efforts data (70 seconds)
 system.time(
   df_efforts_raw <- yrs %>%
-    map_df(~get_fmdb_efforts(
+    purrr::map_df(~get_fmdb_efforts(
       year = .,
       waterbody_type = waterbody_types, 
       gear = target_gears
     ))
 )
-# 5 minutes
 
-# save raw pull
-saveRDS(df_efforts_raw, here("data", "raw_efforts_20220408.rds"))
-# df_efforts_raw <- read_rds(here("data", "raw_efforts_20220408.rds"))
-
-
-
-# Initial filters  ----------------------------------------------------
-
-# filter out surveys with no effort data and that are not proofed
-df_surveys <- df_surveys_raw %>% 
-  semi_join(df_efforts_raw, by = "survey.seq.no") %>% 
-  filter(survey.status %in% target_survey_statuses)
-
-# filter efforts for proofed surveys and remove the test sites
-df_efforts <- df_efforts_raw %>% 
-  filter(site.seq.no != 315) %>% 
-  filter(! is.na(target.species)) %>% 
-  filter(survey.seq.no %in% df_surveys$survey.seq.no)
-
-# check unique survey IDS
-length(unique(df_surveys$survey.seq.no))  
-length(unique(df_efforts$survey.seq.no))  
-
-
-# Fetch fish raw data ----------------------------------------------------------
-
-# using efforts, download fish data 1000 efforts at a time
-vs <- unique(df_efforts$visit.fish.seq.no)
-chunks <- split(vs, ceiling(seq_along(vs)/1000))
-
-get_fmdb_fishraw(visit_seq = chunks[[1]][1])
-
-chunks[[1]][1] %>% map_df(~get_fmdb_fishraw(visit_seq = .))
-
+# Fishraw data (5.4 minutes)
 system.time(
-  df_fishraw <- vs[1:1001] %>% map_df(~get_fmdb_fishraw(visit_seq = .))
+  df_fishraw <- yrs %>%
+    purrr::map_df(~get_fmdb_fishraw(
+      year = .,
+      waterbody_type = waterbody_types, 
+      gear = target_gears
+    ))
 )
 
-# Check records
-length_deleted_rows
-length_warning_rows
 
-# save
-saveRDS(df_fishraw, here(""))
+# Clean up
+rm(length_warning_rows); rm(length_deleted_rows) 
+rm(yrs); rm(target_gears); rm(waterbody_types)
 
 
+# Save raw pulls ===============================================================
+
+saveRDS(df_efforts_raw, here::here("data", "raw_efforts_20220413.rds"))
+saveRDS(df_surveys_raw, here::here("data", "raw_surveys_20220413.rds"))
+saveRDS(df_fishraw, here::here("data", "raw_fish_20220413.rds"))
 
 
 # END Data Pull ================================================================

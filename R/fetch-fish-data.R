@@ -2,8 +2,10 @@
 # Bryan Maitland
 # April 2022
 
+# Overview
+# - Fetch all data from 1994-2021 on flowing water using target gears
 
-# NOTES: 
+# Notes: 
 # - There is a 1000 records max request limit for pulls (server issue)
 # - Every pull results in a connection (which slows it all down)
 
@@ -14,8 +16,6 @@ library(wdnr.fmdb)  # internal WDNR package
 
 
 # Set parameters for data pull -------------------------------------------------
-
-# Fetch all data from 1994-2021 on flowing water using target gears
 
 yrs <- list(1994:1998, 1999:2003, 2004:2008, 2009:2013, 2014:2018, 2019:2021)
 

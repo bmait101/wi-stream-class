@@ -3,16 +3,16 @@
 # April 2022
 
 # Overview
-# - Fetch all data from 1994-2021 on flowing water using target gears
+# - Fetch all data from 1994-2021 on streams using electrofishing
 
-# Notes: 
+# Notes for data pulls: 
 # - There is a 1000 records max request limit for pulls (server issue)
 # - Every pull results in a connection (which slows it all down)
 
 
 # Libraries
 library(wdnr.fmdb)  # internal WDNR package
-# wdnr.fmdb::set_fmdb_credentials()
+# wdnr.fmdb::set_fmdb_credentials()  # must set on first use
 
 
 # Set parameters for data pull -------------------------------------------------
@@ -29,13 +29,13 @@ target_gears <- c(
   "stream_shocker", 
   "backpack_shocker", 
   "mini_boom_shocker", 
-  "boom_shocker", 
-  "hoop_net", 
-  "fyke_net", 
-  "mini_fyke_net", 
-  "bottom_gill_net",
-  "seine", 
-  "setline"
+  "boom_shocker"
+  # "hoop_net", 
+  # "fyke_net", 
+  # "mini_fyke_net", 
+  # "bottom_gill_net",
+  # "seine", 
+  # "setline"
 )
 
 # Fetch data -------------------------------------------------------------------
@@ -70,17 +70,14 @@ system.time(
 )
 
 
-# Clean up
+# Save raw data ----------------------------------------------------------------
+
+save(
+  df_surveys_raw, df_efforts_raw, df_fishraw, 
+  file = here::here("data", "fish_raw_20220418.RData")
+)
+
+# Clean up ---------------------------------------------------------------------
+
 rm(length_warning_rows); rm(length_deleted_rows) 
 rm(yrs); rm(target_gears); rm(waterbody_types)
-
-
-# Save raw pulls ===============================================================
-
-saveRDS(df_efforts_raw, here::here("data", "raw_efforts_20220413.rds"))
-saveRDS(df_surveys_raw, here::here("data", "raw_surveys_20220413.rds"))
-saveRDS(df_fishraw, here::here("data", "raw_fish_20220413.rds"))
-
-
-# END Data Pull ================================================================
-

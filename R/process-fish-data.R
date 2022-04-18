@@ -2,15 +2,23 @@
 # Bryan M Maitland
 # April 2022
 
+## Process raw data pulls from WDNR's FMIS
 
-library(dplyr)
+# - read in raw data pulls
+# - tidy and wrangle
 
+library(here)
+library(tidyverse)
 
 # Data -------------------------------------------------------------------------
 
-df_surveys_raw <- readRDS(here::here("data", "raw_surveys_20220413.rds"))
-df_efforts_raw <- readRDS(here::here("data", "raw_efforts_20220413.rds"))
-df_fishraw <- readRDS(here::here("data", "raw_fish_20220413.rds"))
+load(here("data", "fish_raw_20220418.RData"))
+
+# fix waterbody type column
+df_efforts_raw <- df_efforts_raw %>% 
+  mutate(waterbody.type = tolower(waterbody.type)) %>% 
+  mutate(waterbody.type = str_replace(waterbody.type, " ", "_"))
+
 
 
 # Filter for proofed and complete data  ----------------------------------------
@@ -28,44 +36,64 @@ df_surveys <- df_surveys_raw %>%
     "historical_data_load_status_unknown"
   ))
 
+# Remove any lakes -------------------------------------------------------------
+
+sites_to_remove <- c(
+  122868,  # petenwell lake
+  128668,  # gannet lake on MISS
+  129991,  # MISS island
+  122541,  # lake dubay
+  122541,  # lake saint croix
+  122590,  # lake Wisco
+  142536387,  # lake SUP
+  100822749, # lake eau clair
+  49494326,  # lake Mich
+  129035,  # says oconomowoc_river but obvi Okauchee lake
+  122096,  # Biron Flowage
+  129982  # lily pon MISS
+)
+
+df_surveys <- df_surveys %>%
+  filter(!site.seq.no %in% sites_to_remove)
+
+# Tibble of sites to use with QGIS
+# df_sites <- df_surveys %>%
+#   select(site.seq.no, swims.station.id, wbic, latitude, longitude) %>%
+#   distinct(site.seq.no, .keep_all = TRUE) %>% 
+#   mutate(across(c(swims.station.id,site.seq.no), as.character)) %>% 
+#   write_csv(here("data", "tmp", "sites.csv"))
+
 
 # reduce fish and efforts to good surveys
 df_fish <- df_fishraw %>% semi_join(df_surveys, by = "survey.seq.no")
 df_efforts <- df_efforts_raw %>% semi_join(df_surveys, by = "survey.seq.no")
 
 
-# QC fish data -----------------------------------------------------------------
+## QC fish data ----------------------------------------------------------------
 
-## Zeros and no fish captured 
+### Zeros and no fish captured 
 
-# How many species == "no_fish_captured" 
-df_fish %>% 
-  filter(species == "no_fish_captured") %>% 
-  tally() # 757
-
-# Save these surveys seq 
+# Get list of surveys species == "no_fish_captured"  
 no_fish_surveys <- df_fish %>% 
   filter(species == "no_fish_captured") %>% 
   distinct(survey.seq.no) %>% 
-  pull()
+  pull() 
+# 443
 
-# and Remove these records 
+# remove these records 
 df_fish <- df_fish %>% 
-  filter(!species == "no_fish_captured") %>% 
+  filter(!survey.seq.no %in% no_fish_surveys) %>% 
   droplevels()
 
-# How many NAs for fish counts?
-df_fish %>% filter(is.na(fish.count)) %>% 
-  tally()  # 0
-
-# How many zero counts?
-df_fish %>% filter(fish.count == 0) %>% 
+# How many NAs | zeros for fish counts?
+df_fish %>% 
+  filter(is.na(fish.count) | fish.count == 0) %>% 
   tally()  # 0
 
 # So all the zero counts were associated with "species==no_fish_captured"
 
 
-## Species prevalence in surveys (min 100 observations)
+### Species prevalence in surveys (min 100 observations)
 
 # How many surveys are each species observed in?
 surveys_per_species <- df_fish %>% 
@@ -94,33 +122,42 @@ spp_to_keep <- surveys_per_species %>%
     "sea_lamprey", "alewife", "brook_silverside"
   )) %>% 
   select(2:3)
-# 94 species
+# 91 species
 
 # Filter fish data for good species
 df_fish <- df_fish %>% 
   filter(species %in% spp_to_keep$species) # ~24k records removed
 
-# Expand counts to one row per fish and add lengths from bins
+
+### Expand counts to one row per fish and add lengths from bins
 df_fish_long <- df_fish %>% 
   wdnr.fmdb::expand_counts() %>% 
   wdnr.fmdb::length_bin_to_length()
 
 
-# Reduce surveys/efforts to seqs in filtered fish data
+### Reduce surveys/efforts to seqs in filtered fish data
 df_surveys <- df_surveys %>% semi_join(df_fish, by = "survey.seq.no") 
 df_efforts <- df_efforts %>% semi_join(df_fish, by = "survey.seq.no")
 
 
-# Save cleaned data objects
+
+# Save cleaned data objects ----------------------------------------------------
+
 save(
   df_surveys, df_efforts, df_fish_long, 
   file = here::here("data", "fish_data_clean.RData")
-  )
+)
 
-# # To load the data again
-# load("fish_data_clean.RData")
+# To load the data again
+# load(here("data","fish_clean.RData"))
 
 
 # Compile -----------------------------------
 
 # NEED REACH-LEVEL PA DATASET - SO GO MAKE REACHid X SITE.SEQ XWALK
+
+
+
+
+
+

@@ -13,7 +13,7 @@ df_efforts_raw <- readRDS(here::here("data", "raw_efforts_20220413.rds"))
 df_fishraw <- readRDS(here::here("data", "raw_fish_20220413.rds"))
 
 
-# Filter for proofed and complete data  -------------------------
+# Filter for proofed and complete data  ----------------------------------------
 
 df_surveys <- df_surveys_raw %>% 
   # surveys with fish data
@@ -29,14 +29,14 @@ df_surveys <- df_surveys_raw %>%
   ))
 
 
-# reduce fish 
+# reduce fish and efforts to good surveys
 df_fish <- df_fishraw %>% semi_join(df_surveys, by = "survey.seq.no")
-
-# reduce efforts 
 df_efforts <- df_efforts_raw %>% semi_join(df_surveys, by = "survey.seq.no")
 
 
-# QC fish data ------------------------
+# QC fish data -----------------------------------------------------------------
+
+## Zeros and no fish captured 
 
 # How many species == "no_fish_captured" 
 df_fish %>% 
@@ -54,7 +54,6 @@ df_fish <- df_fish %>%
   filter(!species == "no_fish_captured") %>% 
   droplevels()
 
-
 # How many NAs for fish counts?
 df_fish %>% filter(is.na(fish.count)) %>% 
   tally()  # 0
@@ -63,53 +62,65 @@ df_fish %>% filter(is.na(fish.count)) %>%
 df_fish %>% filter(fish.count == 0) %>% 
   tally()  # 0
 
-
-# reduce surveys to seqs in filtered fish data
-df_surveys <- df_surveys %>% semi_join(df_fish, by = "survey.seq.no")
-
-# reduce efforts to seqs in filtered fish data
-df_efforts <- df_efforts %>% semi_join(df_fish, by = "survey.seq.no")
+# So all the zero counts were associated with "species==no_fish_captured"
 
 
-# Check and remove species -------------------------
-
-df_fish %>% group_by(species) %>% count() %>% arrange(desc(n)) %>% print(n=Inf)
+## Species prevalence in surveys (min 100 observations)
 
 # How many surveys are each species observed in?
 surveys_per_species <- df_fish %>% 
   group_by(species) %>% 
-  mutate(count = n_distinct(survey.seq.no)) %>% 
+  mutate(n_survs_present = n_distinct(survey.seq.no)) %>% 
+  ungroup() %>% 
   distinct(species, .keep_all = TRUE) %>% 
-  select(species, count) %>% 
-  left_join(wdnr.fmdb::spp_ref, by = "species") %>% 
-  filter(!is.na(latin.name)) %>% 
+  select(species, n_survs_present) %>% 
+  left_join(wdnr.fmdb::spp_ref, by = "species") %>%  # link species ref data
+  arrange(thermal.guild.name, desc(n_survs_present)) %>% 
+  relocate(thermal.guild.name, .before = species)
+
+# Get list of species to keep
+spp_to_keep <- surveys_per_species %>% 
+  filter(n_survs_present >= 100) %>%
+  filter(!is.na(latin.name)) %>%  
   filter(!stringr::str_detect(latin.name, "_spp")) %>% 
   filter(!stringr::str_detect(latin.name, "idae")) %>% 
   filter(!stringr::str_detect(species, "crayfish")) %>% 
   filter(!stringr::str_detect(species, "_x_")) %>% 
   filter(!stringr::str_detect(species, "ammocoete")) %>% 
   filter(!species %in% c(
-    "coho_salmon", "lake_trout", "chinook_salmon", "lake_whitefish", "siscowet"
+    # GL salmonids
+    "coho_salmon", "lake_trout", "chinook_salmon", "lake_whitefish", "siscowet",
+    # Other GLs and lake fish
+    "sea_lamprey", "alewife", "brook_silverside"
   )) %>% 
-  arrange(thermal.guild.name, desc(count))
+  select(2:3)
+# 94 species
 
-surveys_per_species %>% 
-  filter(thermal.guild.name=="transitional") %>% select(1:4) %>% print(n=Inf)
-surveys_per_species %>% filter(species=="slimy_sculpin")
+# Filter fish data for good species
+df_fish <- df_fish %>% 
+  filter(species %in% spp_to_keep$species) # ~24k records removed
 
-
-# species to remove 
-# - ammocetes
-# - latin name = NA
-
-
-## Expand counts ------------------
-
-df_trout <- df_trout %>% 
+# Expand counts to one row per fish and add lengths from bins
+df_fish_long <- df_fish %>% 
   wdnr.fmdb::expand_counts() %>% 
   wdnr.fmdb::length_bin_to_length()
 
-# convert lengths to mm
-df_trout <- df_trout %>% 
-  mutate(length_mm = length * 25.4)
 
+# Reduce surveys/efforts to seqs in filtered fish data
+df_surveys <- df_surveys %>% semi_join(df_fish, by = "survey.seq.no") 
+df_efforts <- df_efforts %>% semi_join(df_fish, by = "survey.seq.no")
+
+
+# Save cleaned data objects
+save(
+  df_surveys, df_efforts, df_fish_long, 
+  file = here::here("data", "fish_data_clean.RData")
+  )
+
+# # To load the data again
+# load("fish_data_clean.RData")
+
+
+# Compile -----------------------------------
+
+# NEED REACH-LEVEL PA DATASET - SO GO MAKE REACHid X SITE.SEQ XWALK

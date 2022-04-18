@@ -11,6 +11,8 @@
 
 
 # Libraries
+library(here)
+library(tidyverse)
 library(wdnr.fmdb)  # internal WDNR package
 # wdnr.fmdb::set_fmdb_credentials()  # must set on first use
 

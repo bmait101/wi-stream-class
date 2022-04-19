@@ -12,27 +12,19 @@ library(tidyverse)
 library(here)
 library(sf)
 
-# Set some paths and crs
-path.24k <- here("data","whd","wdnr_24k_hydro.gdb")
-path.24k.va <- here("data","whd","wdnr_24k_hydro_va.gdb")
-wi_crs <- 3071  # NAD83(HARN) / Wisconsin Transverse Mercator
-
 
 ## Data
 
-### 24k WHD flowlines ----------------------------------------------------------
-
-# check layers in 24kWHDPlus VA
-st_layers(dsn = path.24k.va)
+# 24k WHD flowlines
+path.24k <- here("data","whd","wdnr_24k_hydro.gdb")
+path.24k.va <- here("data","whd","wdnr_24k_hydro_va.gdb")
 
 # read in 24k WHD VA flowlines
 whd_lines  <-
   st_read(dsn = path.24k.va, layer = "WD_HYDRO_VA_FLWLN_NTWRK_LN_24K") %>% 
-  st_transform(crs = wi_crs) %>%
   janitor::clean_names()
 
-# filter out streams and lake line connectors
-#  this removes GLs and dangles
+# filter out streams and lake line connectors (removes GLs and dangles)
 whd_lines  <- whd_lines  %>% 
   filter(seedtype %in% c("isolated stream","network stream", "lake")) %>% 
   filter(!is.na(hydroid))  # removes 1 very small lake
@@ -49,7 +41,7 @@ tmp_lines <-
   select(hydroid, hydrocode, hydrotype, wbic = river_sys_wbic) %>%
   as_tibble()
 
-# links wbics to the whd_lines lines
+# Links wbics to the whd_lines lines
 whd_lines <- left_join(whd_lines, tmp_lines, by = "hydroid")
 
 # remove tmps
@@ -100,12 +92,12 @@ whd_data
 
 saveRDS(whd_data, here("data", "whd_data.rds"))
 
-# ### 24k WHD catchments (HUC16s) -----------------------------------------------
+### 24k WHD catchments (HUC16s) -----------------------------------------------
 # 
 # whd_catchs <- load_24k_data(path.24k.va, "WD_HYDRO_VA_CATCHMENT_AR_24K")
 # 
 # 
-# ### Other layers ---------------------------------------------------------------
+### Other layers ---------------------------------------------------------------
 # 
 # #### Watersheds
 # 

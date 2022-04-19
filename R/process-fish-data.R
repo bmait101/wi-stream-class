@@ -38,6 +38,10 @@ df_surveys <- df_surveys_raw %>%
 
 # Remove any lakes -------------------------------------------------------------
 
+waterbody_to_remove <- c(
+  "mississippi_river"
+)
+
 sites_to_remove <- c(
   122868,  # petenwell lake
   128668,  # gannet lake on MISS
@@ -54,7 +58,9 @@ sites_to_remove <- c(
 )
 
 df_surveys <- df_surveys %>%
-  filter(!site.seq.no %in% sites_to_remove)
+  filter(!site.seq.no %in% sites_to_remove) %>% 
+  filter(!waterbody.name %in% waterbody_to_remove)
+
 
 # Tibble of sites to use with QGIS
 # df_sites <- df_surveys %>%

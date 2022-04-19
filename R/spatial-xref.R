@@ -9,66 +9,38 @@
 # WDNR Fish Management surveys should each have a Site ID and a SWIMS ID, 
 # and SWIMS stations should be snapped onto WHD and have associated hydroids.
 
-# BUT, there are tons of stations that were put in at confluences 
+# BUT, there are tons of stations that were put in at confluences or not snapped,
 # so they snapped to multiple hydroids, or that were snapped 
 # to a polygon instead of a flowline, etc 
 
+# - xref sites with SWIMS/WHD xwalk table 
+# - identify sites that need to be associaed with WHD
+# - spatially reference sites
 
-# TO DO 
-# ** Generalize analysis for use with any list of sites with lat and long ******
-
-# Prep
+## Prep
 library(here)
 library(tidyverse)
 library(sf)
 library(nngeo)
 
-wi_crs <- 3071  # NAD83(HARN) / Wisconsin Transverse Mercator
 
-
-## Data
-
-### Fish surevys ----------------------------------------------------------
-
-load(here::here("data", "fish_data_clean.RData"))
-
-
-### Spatial data ---------------------------------------------------------------
-
-# WI polygon
-sf_wi_poly <- wdnr.gis::wi_poly %>% st_transform(crs = wi_crs)
+## Data ---------------
 
 # WHD VA lines
 whd_lines <- readRDS(here("data", "whd_lines.rds"))
 
-# # Read watershed layers
-# sf_huc8 <- st_read(here("data","spatial","shapefiles","hucs","huc8.shp")) %>% 
-#   clean_names() %>% st_transform(crs = 3071)
-# sf_huc10 <- st_read(here("data","spatial","shapefiles","hucs","huc10.shp")) %>% 
-#   clean_names() %>% st_transform(crs = 3071)
-# sf_huc12 <- st_read(here("data","spatial","shapefiles","hucs","huc12.shp")) %>% 
-#   clean_names() %>% st_transform(crs = 3071)
-# sf_ecoreg <- st_read(
-#   here("data","spatial","shapefiles","ecoregions","wi_eco_l3.shp")) %>%
-#   clean_names() %>% st_transform(crs = 3071)
+# Fish surevys
+load(here::here("data", "fish_data_clean.RData"))
 
+## Prep data ---------------
 
-## Get list of surveys sites ---------------------------------------------------
-
-length(unique(df_surveys$site.seq.no))
-length(unique(df_surveys$swims.station.id))  # missing a few SWIMS IDs
-
-# Tibble of sites
+# Get list of distinct surveys sites (and write tmp file for QGIS)
 df_sites <- df_surveys %>%
   select(site.seq.no, swims.station.id, wbic, latitude, longitude) %>%
   distinct(site.seq.no, .keep_all = TRUE) %>% 
   mutate(across(c(swims.station.id,site.seq.no), as.character))  %>% 
+  as_tibble() %>% 
   write_csv(here("data", "tmp", "sites.csv"))
-
-# Make spatial 
-sf_sites <- df_sites %>% 
-  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
-  st_transform(crs = wi_crs)  # CRS of the 24k hydro lines
 
 
 ## Xref with SWIMS/hydro xwalk -------------------------------------------------
@@ -83,8 +55,10 @@ sf_sites <- df_sites %>%
 # - Namekegon issue: whole river is a lake with a 6 reach id
 
 # load xwalk
-xwalk_swims_hydro <- 
-  readRDS(here("data","xref_swims_hydro.rds")) %>% 
+xwalk_swims_hydro <- readRDS(here("data","xref_swims_hydro.rds")) 
+
+# Clean it up
+xwalk_swims_hydro <- xwalk_swims_hydro %>% 
   filter(!is.na(reach_id)) %>% 
   # if a station has more than two records, get rid of them
   # we use spatial joins to get the best one
@@ -93,31 +67,37 @@ xwalk_swims_hydro <-
   ungroup()
 
 
-# New table with all sites that have a match in the xwalk
-sites_x_swims <- inner_join(sf_sites, xwalk_swims_hydro, by="swims.station.id") 
+# New table with all sites in x and y
+sites_xref <- inner_join(df_sites, xwalk_swims_hydro, by="swims.station.id") 
 
-# And a table of sites to link (no match in xwalk)
-sites_to_fix <- anti_join(sf_sites, xwalk_swims_hydro, by="swims.station.id") 
-# 996
+# And a table of sites to link (no match in xwalk) (and write tmp file for QGIS)
+sites_to_fix <- df_sites %>% 
+  filter(!site.seq.no %in% sites_xref$site.seq.no) %>%
+  write_csv(here("data","tmp","sites_to_fix.csv"))
+# 971
 
-# save a tmp sites file with coords for mapping in QGIS
-df_sites %>% 
-  filter(site.seq.no %in% sites_to_fix$site.seq.no) %>% 
-  readr::write_csv(here("data","tmp","sites_to_fix.csv"))
+rm(xwalk_swims_hydro)
+
 
 # Spatial analysis -------------------------------------------------------------
 
-# NN search: identify nearest 3 flowlines to site and get their distances
-system.time(
-  nn_trace <- st_nn(sites_to_fix, whd_lines, k = 3, returnDist = TRUE)
-  )
-# 27 minutes
+# Make sites spatial 
+points <- sites_to_fix %>% 
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(crs = st_crs(whd_lines))  # CRS of the 24k WHD
 
 # Join sites to flowlines using the nearest neighbor
 system.time(
-  nn_join <- st_join(sites_to_fix, whd_lines, join = nngeo::st_nn, k = 3)
+  nn_join <- st_join(points, whd_lines, join = nngeo::st_nn, k = 3)
   )
-# 27 minutes
+# 25 minutes
+
+# NN search: identify nearest 3 flowlines to site and get their distances
+system.time(
+  nn_trace <- st_nn(points, whd_lines, k = 3, returnDist = TRUE)
+  )
+# 25 minutes
+
 
 # extract the nn flowlines indexes and distances from nn search
 nn_distances <- 
@@ -130,101 +110,82 @@ nn_distances <-
 nn_join_full <- bind_cols(nn_join, nn_distances) %>%
   st_drop_geometry() %>%
   as_tibble() %>%
-  select(-confl2conflid, -traceid, -shape_length, -index) %>%
+  select(-confl2conflid, -traceid, -shape_length, -index) %>% 
+  filter(!seedtype == "lake") %>% 
   mutate(across(where(is.integer), as.character)) %>%
-  mutate(wbic_match = wbic.x == wbic.y)
+  mutate(wbic_match = wbic.x == wbic.y)  %>% 
+  group_by(site.seq.no) %>% 
+  mutate(rank = row_number(distance)) %>% 
+  ungroup()
 
 # save intermediary
 saveRDS(nn_join_full, here("data", "tmp", "nn_join.rds"))
 # nn_join_full <- read_rds(here("data","tmp","nn_join.rds"))
 
+rm(nn_join); rm(nn_trace); rm(nn_distances); rm(points)
+
 
 # Process join -----------------------------------------------------------------
 
-nn_join_full %>% filter(distance >=500)
-
-# if wbic matches, keep the hydro record closest to the point
+# Keep the hydro record closest to the point IF wbic matches survey data
 sites_to_fix_1 <- nn_join_full %>% 
-  group_by(site.seq.no) %>% 
-  mutate(rank = row_number(distance)) %>% 
-  filter(rank==1 & wbic_match==TRUE & distance <= 500)
+  filter(rank==1 & wbic_match==TRUE)
 
-# how many still not fixed?
-anti_join(sites_to_fix, sites_to_fix_1, by = "site.seq.no") %>% 
-  st_drop_geometry()
-# 224
-
-sites_to_fix_matched2 <- 
-  nn_join_full %>% 
-  # remove sites already done
+sites_to_fix_2 <- nn_join_full %>% 
   filter(!site.seq.no %in% sites_to_fix_1$site.seq.no) %>% 
-  group_by(site.seq.no) %>% 
-  mutate(rank = row_number(distance)) %>% 
-  filter(rank==2 & wbic_match==TRUE) %>%
-  select(site.seq.no, hydroid, reachid) 
+  filter(rank==2 & wbic_match==TRUE) 
 
-# how many still not fixed?
-anti_join(sites_to_fix, bind_rows(sites_to_fix_1,sites_to_fix_matched2),by="site.seq.no") %>% st_drop_geometry() %>% count()
-# 39 on 2021-12-15
-# 4
-
-# the final 46 hydroids need manual checks; wbics are prob messed up - so, 
-# take whichever is closest, and then go check it
-manual_fixes <- 
-  nn_join_full %>% 
+sites_to_fix_3 <- nn_join_full %>% 
   filter(!site.seq.no %in% sites_to_fix_1$site.seq.no) %>% 
   filter(!site.seq.no %in% sites_to_fix_2$site.seq.no) %>% 
-  group_by(site.seq.no) %>% 
-  slice_min(distance) %>% 
-  write_csv(here("output", "tmp","nn_manual_fixes2.csv"))
-manual_fixes %>% print(n=Inf) 
-# do manual checks #
+  filter(rank==3 & wbic_match==TRUE) 
 
-# load corrected data
-manual_fixed <- read_csv(here("output", "tmp","nn_manual_fixes_corrected.csv"))
+# Many surveys have 9999s for wbics, so not matched
+sites_to_fix_4 <- nn_join_full %>% 
+  filter(str_detect(wbic.x, "^99")) %>% 
+  filter(rank == 1) %>% 
+  arrange(desc(distance))
 
-# sites to remove
-sites_to_remove <- manual_fixed %>% 
-  filter(is.na(reachid_updated)) %>%
-  pull(site.seq.no)
+sites_fixed <- bind_rows(
+  sites_to_fix_1,
+  sites_to_fix_2, 
+  sites_to_fix_3, 
+  sites_to_fix_4
+  ) %>% 
+  select(-wbic.y, -seedtype, -hydrocode, -hydrotype,
+         -distance, -wbic_match, -rank) %>% 
+  rename(wbic = wbic.x, hydro_id = hydroid, reach_id = reachid) %>% 
+  left_join(df_sites %>%
+              select(site.seq.no, latitude, longitude), 
+            by = "site.seq.no") %>% 
+  relocate(c(latitude, longitude), .after = wbic)
 
-sites_to_fix_matched3 <- 
-  manual_fixed %>% 
-  filter(!site.seq.no %in% sites_to_remove) %>% 
-  select(-notes) %>% 
-  mutate(across(where(is.double), as.character)) %>%
-  select(site.seq.no, hydroid, reachid=reachid_updated)
+rm(sites_to_fix_1); rm(sites_to_fix_2); rm(sites_to_fix_3); rm(sites_to_fix_4)
 
-# bind up all the checked fixes
-sites_to_fix_matched_final <- 
-  bind_rows(
-    sites_to_fix_matched, 
-    sites_to_fix_matched2, 
-    sites_to_fix_matched3
-  )
+# How many still not fixed?
+sites_to_fix_short <- 
+  anti_join(sites_to_fix, sites_fixed, by = "site.seq.no") %>%
+  write_csv(here("data","tmp","sites_to_fix_short.csv"))
+# 53
 
-# add hydroids to the list of sites of fix
-sites_to_fix_cln <- 
-  sites_to_fix %>% 
-  st_drop_geometry() %>% 
-  select(-wbic) %>% 
-  inner_join(sites_to_fix_matched_final, by = "site.seq.no") %>% 
-  as_tibble()
+nn_join_full_short <- nn_join_full %>% 
+  filter(site.seq.no %in% sites_to_fix_short$site.seq.no) %>% 
+  print(n=Inf)
 
-# 1d. Bind final table ========================
 
-xwalk_sites_whd <- sites_x_swims %>%
-  st_drop_geometry() %>% 
-  select(-wbic) %>% 
-  rename(hydroid=hydro_id, reachid=reach_id) %>% 
-  bind_rows(sites_to_fix_cln) %>% 
-  select(swims.station.id, site.seq.no, hydro_id=hydroid, reach_id=reachid) %>% 
-  as_tibble() %>% 
-  mutate(hydro_id = if_else(hydro_id=="200026528", "200026525", hydro_id)) %>% 
-  distinct()  # takes care of 2 dups
-xwalk_sites_whd
 
-map(xwalk_sites_whd, ~sum(is.na(.)))
+# 96843735 needs same hydro as 89213237
+
+
+sites_xref_amend <- sites_xref %>% 
+  mutate(wbic = as.character(wbic)) %>% 
+  bind_rows(sites_fixed) %>% 
+  select(site.seq.no, hydro_id, reach_id)
+
+
+
+
+
 
 
 # 1e. Deal with 6s =========================

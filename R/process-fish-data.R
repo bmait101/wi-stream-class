@@ -36,11 +36,9 @@ df_surveys <- df_surveys_raw %>%
     "historical_data_load_status_unknown"
   ))
 
+
 # Remove any lakes -------------------------------------------------------------
 
-waterbody_to_remove <- c(
-  "mississippi_river"
-)
 
 sites_to_remove <- c(
   122868,  # petenwell lake
@@ -48,26 +46,29 @@ sites_to_remove <- c(
   129991,  # MISS island
   122541,  # lake dubay
   122541,  # lake saint croix
+  52346035, # lake saint croix
   122590,  # lake Wisco
   142536387,  # lake SUP
   100822749, # lake eau clair
   49494326,  # lake Mich
   129035,  # says oconomowoc_river but obvi Okauchee lake
   122096,  # Biron Flowage
-  129982  # lily pon MISS
+  129982,  # lily pon MISS
+  134239, # Toekn Creek 'lake"?? VA erroneously has this as a lake feature
+  123664, # Upper Scott Flowage
+  122161,  # CR lock
+  37197582, # unnamed small stream not on hydro and v far from a line
+  122205,  # cox hollow lake
+  130038  # battle slow - MISS
 )
 
 df_surveys <- df_surveys %>%
   filter(!site.seq.no %in% sites_to_remove) %>% 
-  filter(!waterbody.name %in% waterbody_to_remove)
+  filter(!str_detect(waterbody.name, 
+                     "mississippi|flowage|millpond|mill_pond|_r_fl")) %>% 
+  filter(!str_detect(station.name, 
+                     "mississippi|flowage|millpond|mill_pond|_r_fl")) 
 
-
-# Tibble of sites to use with QGIS
-# df_sites <- df_surveys %>%
-#   select(site.seq.no, swims.station.id, wbic, latitude, longitude) %>%
-#   distinct(site.seq.no, .keep_all = TRUE) %>% 
-#   mutate(across(c(swims.station.id,site.seq.no), as.character)) %>% 
-#   write_csv(here("data", "tmp", "sites.csv"))
 
 
 # reduce fish and efforts to good surveys

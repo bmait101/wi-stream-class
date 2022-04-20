@@ -85,7 +85,7 @@ no_fish_surveys <- df_fish %>%
   filter(species == "no_fish_captured") %>% 
   distinct(survey.seq.no) %>% 
   pull() 
-# 443
+# 440
 
 # remove these records 
 df_fish <- df_fish %>% 
@@ -129,7 +129,7 @@ spp_to_keep <- surveys_per_species %>%
     "sea_lamprey", "alewife", "brook_silverside"
   )) %>% 
   select(2:3)
-# 91 species
+# 89 species
 
 # Filter fish data for good species
 df_fish <- df_fish %>% 

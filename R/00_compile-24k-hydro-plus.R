@@ -8,8 +8,8 @@
 
 
 # libraries
-library(tidyverse)
 library(here)
+library(tidyverse)
 library(sf)
 
 
@@ -74,11 +74,6 @@ load_24k_data <- function(path, layer_name) {
     as_tibble()
 }
 
-# test function
-load_24k_data(path.24k.va, "WD_HYDRO_VA_ATTRIBUTE_INFO_REF")
-
-# test mapping function over target layer names
-target_layers[1] %>% map(~load_24k_data(path = path.24k.va, layer_name = .))
 
 # read the data into a nested dataframe
 whd_data <-
@@ -90,7 +85,29 @@ whd_data <-
     )
 whd_data
 
-saveRDS(whd_data, here("data", "whd_data.rds"))
+
+## Extract whd attributes ------------------------------------------------------
+
+whd_metadata <- whd_data[1,2] %>% unnest(cols = layer_data) %>% 
+  select(-table_name) %>% mutate(field_name = tolower(field_name))
+
+whd_base <- whd_data[2,2] %>% unnest(cols = layer_data) 
+whd_c <- whd_data[3,2] %>% unnest(cols = layer_data)
+whd_r <- whd_data[4,2] %>% unnest(cols = layer_data) 
+whd_trr <- whd_data[5,2] %>% unnest(cols = layer_data)
+whd_w <- whd_data[7,2] %>% unnest(cols = layer_data) 
+whd_trw <- whd_data[6,2] %>% unnest(cols = layer_data)
+
+whd_data_tidy <- whd_base %>% 
+  left_join(whd_c, by = "reachid") %>% 
+  left_join(whd_r, by = "reachid") %>% 
+  left_join(whd_trr, by = "reachid") %>% 
+  left_join(whd_w, by = "reachid") %>% 
+  left_join(whd_trw, by = "reachid")
+
+
+saveRDS(whd_metadata, here("data", "whd_metadata.rds"))
+saveRDS(whd_data_tidy, here("data", "whd_data.rds"))
 
 ### 24k WHD catchments (HUC16s) -----------------------------------------------
 # 

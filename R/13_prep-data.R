@@ -37,6 +37,7 @@ df_fish <- df_fish %>% filter(!is.na(reach_id))
 
 ## Summarize PA for each species and each stream reach -------------------------
 
+# For all fish
 df_fish_pa <- df_fish %>% 
   group_by(species, reach_id) %>% 
   summarise(present = sum(fish.count), 
@@ -45,8 +46,22 @@ df_fish_pa <- df_fish %>%
   mutate(present = if_else(present >= 1, 1, 0)) %>% 
   pivot_wider(names_from = "species", values_from = "present", values_fill = 0)
 
-# Save PA df
 df_fish_pa %>% saveRDS(here("data", "df_fish_pa"))
+
+# Sportfish
+df_fish_pa_sport <- df_fish %>% 
+  left_join(wdnr.fmdb::spp_ref %>% select(species, gamefish.flag), 
+            by = "species") %>% 
+  filter(gamefish.flag == "Y") %>% 
+  group_by(species, reach_id) %>% 
+  summarise(present = sum(fish.count), 
+            .groups = 'drop') %>% 
+  # note no zeros because zeros not recorded in surveys
+  mutate(present = if_else(present >= 1, 1, 0)) %>% 
+  pivot_wider(names_from = "species", values_from = "present", values_fill = 0)
+
+df_fish_pa_sport %>% saveRDS(here("data", "df_fish_pa_sport"))
+
 
 
 ## Extract whd attributes ------------------------------------------------------

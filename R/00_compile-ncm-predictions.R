@@ -35,7 +35,7 @@ odbcClose(con)
 
 # Save data ============================================
 
-saveRDS(whd_flow_temp, here::here("data", "whd_ncm_preds"))
+saveRDS(whd_flow_temp, here::here("data", "whd_ncm_preds.rds"))
 
 
 ### END 32-bit R session ###

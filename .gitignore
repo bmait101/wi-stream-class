@@ -3,6 +3,8 @@
 .RData
 .Ruserdata
 
+*.pdf
+
 # ignore large files
 /data
 /docs

@@ -23,7 +23,8 @@ library(tidyverse)  # data manipulation
 library(cluster)    # clustering algorithms
 library(factoextra) # clustering algorithms & visualization
 library(patchwork)  # panel plots
-library(pdftools)
+library(vegan)      # community analsyses
+library(pdftools)   # covert pdfs to pngs
 ```
 
 ## Data
@@ -96,6 +97,35 @@ ggsave(here::here("plots", "explore", "kmeans_sportfish.pdf"),
 ```
 
 
+## Indirect gradient analysis
+
+
+### NMDS on fish P/A
+
+Calculate distance matrix:
+
+```{r}
+dfs_dist <- vegdist(dfs, method = "bray")
+```
+
+Run NNDS:
+
+```{r nmds-sportfish, cache=TRUE}
+system.time(
+  dfs_nms <- 
+    metaMDS(
+      dfs_dist, 
+      distance = "bray", 
+      k = 3, 
+      maxit = 999, 
+      trymax = 500, 
+      wascores = TRUE
+      )
+)
+```
+
+
+## Convert PDF to PNG 
 ```{r convert-pdfs}
 ## convert PDF to PNG
 path <- here::here("plots", "explore")

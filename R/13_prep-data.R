@@ -1,4 +1,4 @@
-# Compile and prepare fish and covariate data for multivariate analysis
+# Prepare fish and covariate data for multivariate analysis
 # Bryan M Maitland
 # April 2022
 
@@ -10,15 +10,31 @@ library(tidyverse)
 
 ## Data ------------------------------------------------------------------------
 
+# Cleaned surveys data 
 load(here("data", "fish_data_clean.RData"))
+
+# Site x reachid crossreference table
 sites_xref <- readRDS(here("data", "sites_whd_xref.rds"))
-whd_ncm <- readRDS(here("data", "whd_ncm_preds.rds")) %>% janitor::clean_names() %>% as_tibble()
-whd_data <- readRDS(here("data", "whd_data.rds")) %>% filter(hyd_cat == "stream")
+
+# NCM model predicted flow and temperature metrics
+whd_ncm <- readRDS(here("data", "whd_ncm_preds.rds")) %>% 
+  janitor::clean_names() %>% 
+  as_tibble()
+
+# Attributetd WHD stream data
+whd_data <- readRDS(here("data", "whd_data.rds")) %>% 
+  filter(hyd_cat == "stream")
+
+# Metatdata for WHD data
 whd_metadata <- readRDS(here("data", "whd_metadata.rds"))
+
+# WHD 24k line feature layer
 whd_lines <- readRDS(here("data", "whd_lines.rds"))
 
 
 ## Prep covariate --------------------------------------------------------------
+
+### NCM
 
 # Pull modeled flow and temp variables used in Diebel et al fish analyses
 whd_ncm_metrics <- whd_ncm %>% 
@@ -80,6 +96,7 @@ whd_data <- whd_data %>% select(
     trw_lu06_grass = trw_lu06_71
     )
   ) %>% 
+  # Combine difference land classes into broader groups
   mutate(
     r_lu06_agric = r_lu06_81 + r_lu06_82, 
     r_lu06_forst = r_lu06_41 + r_lu06_42 + r_lu06_43, 
@@ -100,7 +117,8 @@ whd_data <- whd_data %>% select(
     trw_lu06_forst = trw_lu06_41 + trw_lu06_42 + trw_lu06_43, 
     trw_lu06_wetld = trw_lu06_90 + trw_lu06_95,
     trw_lu06_urban = trw_lu06_21 + trw_lu06_22 + trw_lu06_23 + trw_lu06_24, 
-    ) %>% 
+    ) %>%
+  # Remove the uneeded land classes
   select(
     -r_lu06_81, -r_lu06_82, -r_lu06_41, -r_lu06_42, -r_lu06_43, 
     -r_lu06_90, -r_lu06_95, -r_lu06_21, -r_lu06_22, -r_lu06_23, -r_lu06_24,
@@ -113,7 +131,7 @@ whd_data <- whd_data %>% select(
   )
 
 
-covars <- whd_data %>% left_join(whd_ncm_metrics, by = "reach_id")
+df_attrbs <- whd_data %>% left_join(whd_ncm_metrics, by = "reach_id")
 
 
 ## Prep fish data --------------------------------------------------------------
@@ -134,14 +152,14 @@ df_fish <- df_fish %>% filter(!is.na(reach_id))
 
 # For all fish
 df_fish_pa <- df_fish %>% 
-  group_by(species, reach_id) %>% 
+  group_by(species, site.seq.no) %>% 
   summarise(present = sum(fish.count), 
             .groups = 'drop') %>% 
   # note no zeros because zeros not recorded in surveys
   mutate(present = if_else(present >= 1, 1, 0)) %>% 
   pivot_wider(names_from = "species", values_from = "present", values_fill = 0)
 
-df_fish_pa %>% saveRDS(here("data", "df_fish_pa"))
+df_fish_pa %>% saveRDS(here("data", "df_fish_pa.rds"))
 
 # Sportfish
 df_fish_pa_sport <- df_fish %>% 
@@ -155,6 +173,23 @@ df_fish_pa_sport <- df_fish %>%
   mutate(present = if_else(present >= 1, 1, 0)) %>% 
   pivot_wider(names_from = "species", values_from = "present", values_fill = 0)
 
-df_fish_pa_sport %>% saveRDS(here("data", "df_fish_pa_sport"))
+df_fish_pa_sport %>% saveRDS(here("data", "df_fish_pa_sport.rds"))
 
 
+
+
+tmp <- df_fish %>% 
+  filter(year>2000) %>% 
+  left_join(wdnr.fmdb::spp_ref %>% select(species, gamefish.flag), 
+            by = "species") %>% 
+  filter(gamefish.flag == "Y") %>% 
+  group_by(species, survey.seq.no) %>% 
+  summarise(present = sum(fish.count), 
+            .groups = 'drop') %>% 
+  # note no zeros because zeros not recorded in surveys
+  mutate(present = if_else(present >= 1, 1, 0)) %>% 
+  pivot_wider(names_from = "species", values_from = "present", values_fill = 0)
+
+tmp %>% 
+  pivot_longer(-survey.seq.no, names_to = "species", values_to = "present") %>% 
+  filter(species == "brook_trout")

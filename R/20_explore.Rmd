@@ -23,7 +23,7 @@ library(tidyverse)  # data manipulation
 library(cluster)    # clustering algorithms
 library(factoextra) # clustering algorithms & visualization
 library(patchwork)  # panel plots
-
+library(pdftools)
 ```
 
 ## Data
@@ -43,6 +43,8 @@ dfs <- df_fish_pa_sport %>% column_to_rownames("reach_id")
 
 ### All species P/A
 
+Do the clustering:
+
 ```{r}
 k2 <- kmeans(df, centers = 2, nstart = 25)
 k3 <- kmeans(df, centers = 3, nstart = 25)
@@ -51,7 +53,8 @@ k5 <- kmeans(df, centers = 5, nstart = 25)
 
 ```
 
-### Plots to compare
+Plots to compare clusters:
+
 ```{r plot-k-means-all-fish, fig.align='center', fig.width=12, fig.height=8}
 p1 <- fviz_cluster(k2, geom = "point", data = df) + ggtitle("k = 2")
 p2 <- fviz_cluster(k3, geom = "point",  data = df) + ggtitle("k = 3")
@@ -60,10 +63,14 @@ p4 <- fviz_cluster(k5, geom = "point",  data = df) + ggtitle("k = 5")
 
 (p.all.spp <- (p1 + p2) / (p3 + p4) )
 
+ggsave(here::here("plots", "explore", "kmeans_fish.pdf"), 
+       width = 12, height = 8, device = cairo_pdf)
 ```
 
 
 ### Only sportfish P/A
+
+Do the clustering:
 
 ```{r}
 k2s <- kmeans(dfs, centers = 2, nstart = 25)
@@ -74,7 +81,8 @@ k5s <- kmeans(dfs, centers = 5, nstart = 25)
 ```
 
 
-### Plots to compare
+Plots to compare clusters:
+
 ```{r plot-k-means-sportfish, fig.align='center', fig.width=12, fig.height=8}
 p1s <- fviz_cluster(k2s, geom = "point", data = dfs) + ggtitle("k = 2")
 p2s <- fviz_cluster(k3s, geom = "point",  data = dfs) + ggtitle("k = 3")
@@ -83,9 +91,21 @@ p4s <- fviz_cluster(k5s, geom = "point",  data = dfs) + ggtitle("k = 5")
 
 (p.sportfish <- (p1s + p2s) / (p3s + p4s) )
 
-
+ggsave(here::here("plots", "explore", "kmeans_sportfish.pdf"), 
+       width = 12, height = 8, device = cairo_pdf)
 ```
 
+
+```{r convert-pdfs}
+## convert PDF to PNG
+path <- here::here("plots", "explore")
+pdfs <- list.files(path, pattern = "*.pdf", recursive = TRUE)
+for(pdf in pdfs) {
+  pdf_convert(pdf = glue::glue("{path}/{pdf}"), 
+              filenames = glue::glue("{path}/{str_remove(pdf, '.pdf')}.png"),
+              format = "png", dpi = 500)
+}
+```
 
 *** 
 

@@ -133,6 +133,8 @@ whd_data <- whd_data %>% select(
 
 df_attrbs <- whd_data %>% left_join(whd_ncm_metrics, by = "reach_id")
 
+df_attrbs %>% saveRDS(here("data", "df_attrbs.rds"))
+
 
 ## Prep fish data --------------------------------------------------------------
 

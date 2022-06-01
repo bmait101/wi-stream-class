@@ -33,6 +33,7 @@ library(pdftools)   # covert pdfs to pngs
 # read in
 df_fish_pa <- readRDS(here::here("data", "df_fish_pa.rds"))
 df_fish_pa_sport <- readRDS(here::here("data", "df_fish_pa_sport.rds"))
+df_attrbs <- readRDS(here::here("data", "df_attrbs.rds"))
 
 # make rownames
 df <- df_fish_pa %>% column_to_rownames("reach_id")
@@ -96,34 +97,96 @@ ggsave(here::here("plots", "explore", "kmeans_sportfish.pdf"),
        width = 12, height = 8, device = cairo_pdf)
 ```
 
+### Environmental variables
 
-## Indirect gradient analysis
-
-
-### NMDS on fish P/A
-
-Calculate distance matrix:
+Do the clustering:
 
 ```{r}
-dfs_dist <- vegdist(dfs, method = "bray")
+# filter out reaches with fish data
+dfe <- df_attrbs %>% 
+  filter(reach_id %in% df_fish_pa$reach_id) %>% 
+  select(!ends_with("dist")) %>%   # to many NAs
+  column_to_rownames("reach_id") %>% 
+  na.omit()
 ```
 
-Run NNDS:
+```{r}
+k2e <- kmeans(dfe, centers = 2, nstart = 25)
+k3e <- kmeans(dfe, centers = 3, nstart = 25)
+k4e <- kmeans(dfe, centers = 4, nstart = 25)
+k5e <- kmeans(dfe, centers = 5, nstart = 25)
 
-```{r nmds-sportfish, cache=TRUE}
-system.time(
-  dfs_nms <- 
-    metaMDS(
-      dfs_dist, 
-      distance = "bray", 
-      k = 3, 
-      maxit = 999, 
-      trymax = 500, 
-      wascores = TRUE
-      )
-)
 ```
 
+Plots to compare clusters:
+
+```{r plot-k-means-env, fig.align='center', fig.width=12, fig.height=8}
+p1 <- fviz_cluster(k2e, geom = "point", data = dfe) + ggtitle("k = 2")
+p2 <- fviz_cluster(k3e, geom = "point",  data = dfe) + ggtitle("k = 3")
+p3 <- fviz_cluster(k4e, geom = "point",  data = dfe) + ggtitle("k = 4")
+p4 <- fviz_cluster(k5e, geom = "point",  data = dfe) + ggtitle("k = 5")
+
+(p.all.spp <- (p1 + p2) / (p3 + p4) )
+
+ggsave(here::here("plots", "explore", "kmeans_enviro.pdf"), 
+       width = 12, height = 8, device = cairo_pdf)
+```
+
+### Slected Environmental variables
+
+Do the clustering:
+
+```{r}
+# filter out reaches with fish data
+dfe <- df_attrbs %>% 
+  filter(reach_id %in% df_fish_pa$reach_id) %>% 
+  select(reach_id,
+    trw_area, gradient, sinuosity, 
+    w_prcp_ann, trw_prcp_ann, 
+    temp_max_cl_cc, temp_july_cl_cc, temp_summer_cl_cc, 
+    apr_e10_c, aug_e50_c, wy_e50_c, wy_e90_c | contains("temp")
+    ) %>% 
+  column_to_rownames("reach_id") %>% 
+  na.omit()
+```
+
+```{r}
+k2e <- kmeans(dfe, centers = 2, nstart = 25)
+k3e <- kmeans(dfe, centers = 3, nstart = 25)
+k4e <- kmeans(dfe, centers = 4, nstart = 25)
+k5e <- kmeans(dfe, centers = 5, nstart = 25)
+k7e <- kmeans(dfe, centers = 7, nstart = 25)
+k10e <- kmeans(dfe, centers = 10, nstart = 25)
+
+```
+
+Plots to compare clusters:
+
+```{r plot-k-means-env-select, fig.align='center', fig.width=12, fig.height=8}
+p1 <- fviz_cluster(k2e, geom = "point", data = dfe) + ggtitle("k = 2")
+p2 <- fviz_cluster(k3e, geom = "point",  data = dfe) + ggtitle("k = 3")
+p3 <- fviz_cluster(k4e, geom = "point",  data = dfe) + ggtitle("k = 4")
+p4 <- fviz_cluster(k5e, geom = "point",  data = dfe) + ggtitle("k = 5")
+p7 <- fviz_cluster(k7e, geom = "point",  data = dfe) + ggtitle("k = 5")
+p10 <- fviz_cluster(k10e, geom = "point",  data = dfe) + ggtitle("k = 5")
+
+(p.all.spp <- (p1 + p2) / (p3 + p4) / (p7 + p10))
+
+ggsave(here::here("plots", "explore", "kmeans_enviro_select.pdf"), 
+       width = 12, height = 8, device = cairo_pdf)
+```
+
+
+
+## Next Steps
+
+* run RF models to identify most important variables predicting spp. P/A in reaches
+* run cluster analysis on stream reaches using important enviro variables
+* run LDA to predict and check classification accuracy
+
+
+
+*** 
 
 ## Convert PDF to PNG 
 ```{r convert-pdfs}
@@ -136,8 +199,6 @@ for(pdf in pdfs) {
               format = "png", dpi = 500)
 }
 ```
-
-*** 
 
 ## Session Info
 

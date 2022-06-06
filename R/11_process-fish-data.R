@@ -24,7 +24,7 @@ df_efforts_raw <- df_efforts_raw %>%
 
 ## Process data -------------
 
-### Proofed data ----
+### Proofed and complete data ----
 
 df_surveys <- df_surveys_raw %>% 
   # surveys with fish data
@@ -40,7 +40,7 @@ df_surveys <- df_surveys_raw %>%
   ))
 
 
-### Lakes ----
+### Remove lakes ----
 
 # List of sites on lakes / flowages / backwaters
 sites_to_remove <- c(
@@ -79,7 +79,7 @@ df_efforts <- df_efforts_raw %>% semi_join(df_surveys, by = "survey.seq.no")
 
 
 
-### Zeros  ----
+### Zeros and no-fish-captured  ----
 
 # Get list of surveys species == "no_fish_captured"  
 no_fish_surveys <- df_fish %>% 

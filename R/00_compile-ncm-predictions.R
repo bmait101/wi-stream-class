@@ -1,10 +1,8 @@
-# Connect to and pull data from local MS Access database
+# Compile NCM flow/temp predictions from local MS Access database
 # Bryan M Maitland
-# April 2022
+# June 2022
 
-# ==============================================================================
-
-# Workflow
+# Workflow:
 # - switch to 32-bit R (global options, then restart R)
 # - connect to MS Access database
 # - pull data

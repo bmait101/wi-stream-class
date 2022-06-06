@@ -1,13 +1,17 @@
-# Fetch stream and river fish data from WDNR's FMIS
+# Fetch stream and river fisheries survey data from WDNR FMIS
 # Bryan Maitland
-# April 2022
+# June 2022
 
 # Overview
 # - Fetch all data from 1994-2021 on streams using electrofishing
 
-# Notes for data pulls: 
+# Notes: 
 # - There is a 1000 records max request limit for pulls (server issue)
 # - Every pull results in a connection (which slows it all down)
+
+# In: 
+# Out: 
+# - fish_raw_20220418.RData
 
 
 # Libraries

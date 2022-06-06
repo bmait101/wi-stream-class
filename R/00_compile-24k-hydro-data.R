@@ -1,10 +1,6 @@
-# Explore / Prep WDNR 24k Hydro Lines and Datasets
+# Compile WDNR 24k Hydro Lines and Datasets
 # Bryan Maitland
-# April 2022
-
-
-# GDB available at https://www.arcgis.com/home/item.html?id=c4bc634ba115498487174bda137f8de8
-# Other shapefiles can be found at https://data-wi-dnr.opendata.arcgis.com/
+# June 2022
 
 
 # libraries
@@ -15,43 +11,48 @@ library(sf)
 
 ## Data
 
-# 24k WHD flowlines
-path.24k <- here("data","whd","wdnr_24k_hydro.gdb")
-path.24k.va <- here("data","whd","wdnr_24k_hydro_va.gdb")
+# WDNR 24k Hydro Geodatabases must be downloaded to 'data' dir. 
+# Available at: https://www.arcgis.com/home/item.html?id=c4bc634ba115498487174bda137f8de8
 
-# read in 24k WHD VA flowlines
+
+### Flowline spatial features ----------
+
+# Set paths for 24k WHD flowlines on local drive
+path.24k.va <- here("data","whd","wdnr_24k_hydro_va.gdb")
+path.24k <- here("data","whd","wdnr_24k_hydro.gdb")
+
+# Read in 24k WHD VA flowlines
 whd_lines  <-
   st_read(dsn = path.24k.va, layer = "WD_HYDRO_VA_FLWLN_NTWRK_LN_24K") %>% 
   janitor::clean_names()
 
-# filter out streams and lake line connectors (removes GLs and dangles)
+# filter out GLs and dangle features, keeping only streams and lake line connectors
 whd_lines  <- whd_lines  %>% 
   filter(seedtype %in% c("isolated stream","network stream", "lake")) %>% 
   filter(!is.na(hydroid))  # removes 1 very small lake
 
-
-# Read 24k base flowlines to get WBICS for streams 
+# Flowlines do not have WBICS; get from 24k base flowlines  
 tmp_lines <-
-  rgdal::readOGR(
-    dsn = path.24k,
-    layer = "WD_HYDRO_FLOWLINE_LN_24K") %>%
+  rgdal::readOGR(dsn = path.24k, layer = "WD_HYDRO_FLOWLINE_LN_24K") %>%
   st_as_sf() %>%
   janitor::clean_names() %>% 
   st_drop_geometry() %>%
   select(hydroid, hydrocode, hydrotype, wbic = river_sys_wbic) %>%
   as_tibble()
 
-# Links wbics to the whd_lines lines
+# Add wbics to the flowline sf
 whd_lines <- left_join(whd_lines, tmp_lines, by = "hydroid")
 
-# remove tmps
+# Clean up
 rm(tmp_lines)
 
+# Save rds object
 saveRDS(whd_lines, here("data", "whd_lines.rds"))
 
 
-### 24k WHD attribute data -----------------------------------------------------
+### 24k WHD attribute data -------------
 
+# Data stored as attributes tables in 24k VA GDB
 # Characteristic of hydrographic features calculated at 5 spatial scales
 # - channel
 # - incremental riparian
@@ -59,23 +60,21 @@ saveRDS(whd_lines, here("data", "whd_lines.rds"))
 # - incremental watershed
 # - trace (cumulative) watershed
 
-# list of layers to read in
+# Make list of layers to read in:
 target_layers <- 
   st_layers(dsn = path.24k.va)$name %>% 
   as_tibble() %>% 
   filter(str_detect(value, "INFO|BASE|CHANNEL|RIPARIAN|WATERSHED")) %>% 
   pull()
 
-
-# function to read and clean tables
+# Make function to read and clean tables:
 load_24k_data <- function(path, layer_name) {
   st_read(dsn = path, layer = layer_name) %>% 
     janitor::clean_names() %>% 
     as_tibble()
 }
 
-
-# read the data into a nested dataframe
+# Apply the function to read data tables into a nested dataframe:
 whd_data <-
   data_frame(layer = target_layers) %>%
   mutate(
@@ -83,13 +82,17 @@ whd_data <-
       layer, 
       ~load_24k_data(path = path.24k.va, layer_name = .))
     )
+
+# Check it
 whd_data
 
 
-## Extract whd attributes ------------------------------------------------------
+# Extract whd attributes
 
-whd_metadata <- whd_data[1,2] %>% unnest(cols = layer_data) %>% 
-  select(-table_name) %>% mutate(field_name = tolower(field_name))
+whd_metadata <- whd_data[1,2] %>% 
+  unnest(cols = layer_data) %>% 
+  select(-table_name) %>% 
+  mutate(field_name = tolower(field_name))
 
 whd_base <- whd_data[2,2] %>% unnest(cols = layer_data) 
 whd_c <- whd_data[3,2] %>% unnest(cols = layer_data)
@@ -105,34 +108,7 @@ whd_data_tidy <- whd_base %>%
   left_join(whd_w, by = "reachid") %>% 
   left_join(whd_trw, by = "reachid")
 
-
+# Save rds objects
 saveRDS(whd_metadata, here("data", "whd_metadata.rds"))
 saveRDS(whd_data_tidy, here("data", "whd_data.rds"))
-
-### 24k WHD catchments (HUC16s) -----------------------------------------------
-# 
-# whd_catchs <- load_24k_data(path.24k.va, "WD_HYDRO_VA_CATCHMENT_AR_24K")
-# 
-# 
-### Other layers ---------------------------------------------------------------
-# 
-# #### Watersheds
-# 
-# huc8 <- st_read(here("data","spatial","shapefiles","hucs","huc8.shp")) %>% 
-#   clean_names() %>% st_transform(crs = 3071)
-# huc10 <- st_read(here("data","spatial","shapefiles","hucs","huc10.shp")) %>% 
-#   clean_names() %>% st_transform(crs = 3071)
-# huc12 <- st_read(here("data","spatial","shapefiles","hucs","huc12.shp")) %>% 
-#   clean_names() %>% st_transform(crs = 3071)
-# ecoreg <- st_read(
-#   here("data","spatial","shapefiles","ecoregions","wi_eco_l3.shp")) %>%
-#   clean_names() %>% st_transform(crs = 3071)
-# 
-# 
-# #### Wisconsin polygon
-# wisco_border <- wdnr.gis::wi_poly %>% 
-#   st_transform(crs = wi_crs) 
-
-
-
 

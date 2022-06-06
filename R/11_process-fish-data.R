@@ -1,27 +1,30 @@
 # Process raw WDNR FWIS data pulls
 # Bryan M Maitland
-# April 2022
+# June 2022
 
-## Process raw data pulls from WDNR's FMIS
+# In: 
+# - fish_raw_20220418.RData
+# Out: 
+# - fish_data_clean.RData (df_surveys, df_efforts, df_fish_long)
 
-# - read in raw data pulls
-# - tidy and wrangle
-
+# Libraries
 library(here)
 library(tidyverse)
 
-# Data -------------------------------------------------------------------------
+
+## Data -------------------
 
 load(here("data", "fish_raw_20220418.RData"))
 
-# fix waterbody type column
+# Fix waterbody type column
 df_efforts_raw <- df_efforts_raw %>% 
   mutate(waterbody.type = tolower(waterbody.type)) %>% 
   mutate(waterbody.type = str_replace(waterbody.type, " ", "_"))
 
 
+## Process data -------------
 
-# Filter for proofed and complete data  ----------------------------------------
+### Proofed data ----
 
 df_surveys <- df_surveys_raw %>% 
   # surveys with fish data
@@ -37,9 +40,9 @@ df_surveys <- df_surveys_raw %>%
   ))
 
 
-# Remove any lakes -------------------------------------------------------------
+### Lakes ----
 
-
+# List of sites on lakes / flowages / backwaters
 sites_to_remove <- c(
   122868,  # petenwell lake
   128668,  # gannet lake on MISS
@@ -62,6 +65,7 @@ sites_to_remove <- c(
   130038  # battle slow - MISS
 )
 
+# Filter out lakes
 df_surveys <- df_surveys %>%
   filter(!site.seq.no %in% sites_to_remove) %>% 
   filter(!str_detect(waterbody.name, 
@@ -69,16 +73,13 @@ df_surveys <- df_surveys %>%
   filter(!str_detect(station.name, 
                      "mississippi|flowage|millpond|mill_pond|_r_fl")) 
 
-
-
-# reduce fish and efforts to good surveys
+# Reduce fish counts and efforts to good surveys
 df_fish <- df_fishraw %>% semi_join(df_surveys, by = "survey.seq.no")
 df_efforts <- df_efforts_raw %>% semi_join(df_surveys, by = "survey.seq.no")
 
 
-## QC fish data ----------------------------------------------------------------
 
-### Zeros and no fish captured 
+### Zeros  ----
 
 # Get list of surveys species == "no_fish_captured"  
 no_fish_surveys <- df_fish %>% 
@@ -95,15 +96,20 @@ df_fish <- df_fish %>%
 # How many NAs | zeros for fish counts?
 df_fish %>% 
   filter(is.na(fish.count) | fish.count == 0) %>% 
-  tally()  # 0
+  tally()  
+# 0
 
 # So all the zero counts were associated with "species==no_fish_captured"
 
 
-### Species prevalence in surveys (min 100 observations)
+### Species prevalence  ----
+
+# filter out super rare species and those not 'stream' depependent
+# min 100 observations to keep a species
 
 # How many surveys are each species observed in?
-surveys_per_species <- df_fish %>% 
+surveys_per_species <- 
+  df_fish %>% 
   group_by(species) %>% 
   mutate(n_survs_present = n_distinct(survey.seq.no)) %>% 
   ungroup() %>% 
@@ -114,57 +120,40 @@ surveys_per_species <- df_fish %>%
   relocate(thermal.guild.name, .before = species)
 
 # Get list of species to keep
-spp_to_keep <- surveys_per_species %>% 
-  filter(n_survs_present >= 100) %>%
-  filter(!is.na(latin.name)) %>%  
-  filter(!stringr::str_detect(latin.name, "_spp")) %>% 
-  filter(!stringr::str_detect(latin.name, "idae")) %>% 
-  filter(!stringr::str_detect(species, "crayfish")) %>% 
-  filter(!stringr::str_detect(species, "_x_")) %>% 
-  filter(!stringr::str_detect(species, "ammocoete")) %>% 
+spp_to_keep <- 
+  surveys_per_species %>% 
+  filter(n_survs_present >= 100) %>%  # min 100 observations
+  filter(!is.na(latin.name)) %>%   # remove unknown species
+  filter(!stringr::str_detect(latin.name, "_spp")) %>% # remove unknown species
+  filter(!stringr::str_detect(latin.name, "idae")) %>% # remove unknown species
+  filter(!stringr::str_detect(species, "crayfish")) %>% # remove unknown species
+  filter(!stringr::str_detect(species, "_x_")) %>% # remove hybrids
+  filter(!stringr::str_detect(species, "ammocoete")) %>% # remove baby lamprey
   filter(!species %in% c(
-    # GL salmonids
-    "coho_salmon", "lake_trout", "chinook_salmon", "lake_whitefish", "siscowet",
-    # Other GLs and lake fish
-    "sea_lamprey", "alewife", "brook_silverside"
+    "coho_salmon", "lake_trout", "chinook_salmon", "lake_whitefish", "siscowet", # GL salmonids
+    "sea_lamprey", "alewife", "brook_silverside" # Other GLs and lake fish
   )) %>% 
   select(2:3)
 # 89 species
 
-# Filter fish data for good species
-df_fish <- df_fish %>% 
-  filter(species %in% spp_to_keep$species) # ~24k records removed
+# Filter fish data for good species (n=89)
+df_fish <- df_fish %>% filter(species %in% spp_to_keep$species)
+# ~24k records removed
 
-
-### Expand counts to one row per fish and add lengths from bins
+# Expand counts to one row per fish and add lengths from bins
 df_fish_long <- df_fish %>% 
   wdnr.fmdb::expand_counts() %>% 
   wdnr.fmdb::length_bin_to_length()
 
-
-### Reduce surveys/efforts to seqs in filtered fish data
+# Reduce surveys / efforts to seqs in filtered fish data
 df_surveys <- df_surveys %>% semi_join(df_fish, by = "survey.seq.no") 
 df_efforts <- df_efforts %>% semi_join(df_fish, by = "survey.seq.no")
 
 
-
-# Save cleaned data objects ----------------------------------------------------
+## Save data ----
 
 save(
   df_surveys, df_efforts, df_fish_long, 
   file = here::here("data", "fish_data_clean.RData")
 )
-
-# To load the data again
-# load(here("data","fish_clean.RData"))
-
-
-# Compile -----------------------------------
-
-# NEED REACH-LEVEL PA DATASET - SO GO MAKE REACHid X SITE.SEQ XWALK
-
-
-
-
-
 

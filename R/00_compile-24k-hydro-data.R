@@ -2,6 +2,14 @@
 # Bryan Maitland
 # June 2022
 
+# In: 
+# - WDNR 24k Geodatabase
+# - WDNR 24k VA Geodatabase
+
+# Out: 
+# - whd_lines
+# - whd_data
+# - whd_metadata
 
 # libraries
 library(here)

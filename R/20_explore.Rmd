@@ -1,5 +1,5 @@
 ---
-title: "WI Stream Classes - Exploratory Analyses"
+title: "WI Stream Classes - Exploratory Clustering"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -16,7 +16,6 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
                       dev = "ragg_png", res = 500, retina = 1)
 ```
 
-
 ```{r prep, warning=FALSE, message=FALSE}
 # packages
 library(tidyverse)  # data manipulation
@@ -25,164 +24,439 @@ library(factoextra) # clustering algorithms & visualization
 library(patchwork)  # panel plots
 library(vegan)      # community analsyses
 library(pdftools)   # covert pdfs to pngs
+
+theme_set(theme_bw())
 ```
+
+## To Do
+
+* run LDA to predict and check classification accuracy
+
 
 ## Data
 
-```{r data}
-# read in
-df_fish_pa <- readRDS(here::here("data", "df_fish_pa.rds"))
-df_fish_pa_sport <- readRDS(here::here("data", "df_fish_pa_sport.rds"))
-df_attrbs <- readRDS(here::here("data", "df_attrbs.rds"))
-
-# make rownames
-df <- df_fish_pa %>% column_to_rownames("reach_id")
-dfs <- df_fish_pa_sport %>% column_to_rownames("reach_id")
-
+```{r echo=FALSE}
+source(here::here("R", "13_prep-data.R"))  # ~1-2 min load time
 ```
 
-## k-mean cluster analysis
+There are two primary datasets: 
 
-### All species P/A
+* Fish community data: Catch and effort data for all electrofishing surveys (boom, backpack, barge) done on streams by the WDNR from 1994-2020. Excludes all lake and Mississippi River sites. Data was pulled from the WDNR FMIS on 18 April 2022. 
+* 24k WI Hydrography attribute data: A geodatabase of channel, riparian, and watershed attributes for all stream and lake features in 1:24,000 WI Hydrography database. Available at for download [here](https://www.arcgis.com/home/item.html?id=c4bc634ba115498487174bda137f8de8).
 
-Do the clustering:
+Fish data:
+```{r}
+df_fish
+```
+
+Hydrography attribute data:
+```{r}
+whd_data
+```
+
+
+
+## Fish Community
+
+Goal: Partition streams into groups based on reach-level fish species presence-absence data. We do this for two objectives: 1) ecology (the whole fish community) and 2) fisheries (primary sportfish species). 
+
+Here, as a first-cut, I use k-means cluster. 
+
+
+### Data prep
+
+We will ordinate on presence / absence matrices for the fish community. 
 
 ```{r}
-k2 <- kmeans(df, centers = 2, nstart = 25)
-k3 <- kmeans(df, centers = 3, nstart = 25)
-k4 <- kmeans(df, centers = 4, nstart = 25)
-k5 <- kmeans(df, centers = 5, nstart = 25)
+
+# All spp. P/A
+
+pa_all <- 
+  df_fish %>% 
+  group_by(species, reach_id) %>% 
+  summarise(present = sum(fish.count), 
+            .groups = 'drop') %>% 
+  mutate(present = if_else(present >= 1, 1, 0)) %>% 
+  pivot_wider(names_from = "species", values_from = "present", values_fill = 0) %>%
+  column_to_rownames("reach_id")
+
+
+# Sport fish P/A
+
+sport.spp <- c(
+  "muskellunge", "northern_pike", "walleye", "sauger",
+    "largemouth_bass", "smallmouth_bass", 
+    "channel_catfish", "flathead_catfish",
+    "brook_trout", "brown_trout", "rainbow_trout",
+    "lake_sturgeon", 
+    "black_crappie", "bluegill", "green_sunfish", "pumpkinseed", 
+    "rock_bass", "yellow_perch"
+  )
+
+pan.spp <- c(
+    "black_crappie", "bluegill", "green_sunfish", "pumpkinseed", 
+    "rock_bass", "yellow_perch"
+  )
+
+trout.spp <- c("brook_trout", "brown_trout", "rainbow_trout")
+
+pa_sport <- df_fish %>%
+  filter(species %in% sport.spp) %>%
+  group_by(species, reach_id) %>%
+  summarise(present = sum(fish.count),
+            .groups = 'drop') %>%
+  mutate(present = if_else(present >= 1, 1, 0)) %>%
+  pivot_wider(names_from = "species", values_from = "present", values_fill = 0) %>%
+  column_to_rownames("reach_id")
+
+
+pa_sport <- df_fish %>% 
+  filter(species %in% sport.spp) %>% 
+  mutate(
+    species = case_when(
+      species %in% c("channel_catfish","flathead_catfish") ~ "catfish",
+      species %in% pan.spp ~ "panfish",
+      # species %in% trout.spp ~ "trout",
+      TRUE ~ species
+  )) %>%
+  group_by(species, reach_id) %>% 
+  summarise(present = sum(fish.count), 
+            .groups = 'drop') %>% 
+  mutate(present = if_else(present >= 1, 1, 0)) %>% 
+  pivot_wider(names_from = "species", values_from = "present", values_fill = 0) %>%
+  column_to_rownames("reach_id")
+
 
 ```
 
-Plots to compare clusters:
 
-```{r plot-k-means-all-fish, fig.align='center', fig.width=12, fig.height=8}
-p1 <- fviz_cluster(k2, geom = "point", data = df) + ggtitle("k = 2")
-p2 <- fviz_cluster(k3, geom = "point",  data = df) + ggtitle("k = 3")
-p3 <- fviz_cluster(k4, geom = "point",  data = df) + ggtitle("k = 4")
-p4 <- fviz_cluster(k5, geom = "point",  data = df) + ggtitle("k = 5")
 
-(p.all.spp <- (p1 + p2) / (p3 + p4) )
+#### Clustering: all species
 
+Elbow method for optimal clusters:
+
+```{r fig.align='center', fig.width=12, fig.height=8}
+# function to compute total within-cluster sum of square 
+wss <- function(k) {
+  kmeans(pa_all, k, nstart = 10)$tot.withinss
+}
+
+# Compute and plot wss for k = 1 to k = 15
+k.values <- 1:15
+
+# extract wss for 2-15 clusters
+wss_values <- map_dbl(k.values, wss)
+
+plot(k.values, wss_values,
+       type="b", pch = 19, frame = FALSE, 
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+```
+
+
+Clustering and plots: 
+
+```{r fig.align='center', fig.width=12, fig.height=12}
+
+# Clustering
+k2 <- kmeans(pa_all, centers = 2, nstart = 25)
+k3 <- kmeans(pa_all, centers = 3, nstart = 25)
+k4 <- kmeans(pa_all, centers = 4, nstart = 25)
+k5 <- kmeans(pa_all, centers = 5, nstart = 25)
+k6 <- kmeans(pa_all, centers = 6, nstart = 25)
+k7 <- kmeans(pa_all, centers = 7, nstart = 25)
+
+# Plots
+p1 <- fviz_cluster(k2, geom = "point", data = pa_all) + ggtitle("k = 2")
+p2 <- fviz_cluster(k3, geom = "point", data = pa_all) + ggtitle("k = 3")
+p3 <- fviz_cluster(k4, geom = "point", data = pa_all) + ggtitle("k = 4")
+p4 <- fviz_cluster(k5, geom = "point", data = pa_all) + ggtitle("k = 5")
+p5 <- fviz_cluster(k6, geom = "point", data = pa_all) + ggtitle("k = 6")
+p6 <- fviz_cluster(k7, geom = "point", data = pa_all) + ggtitle("k = 7")
+
+# Panel
+p.all.spp <- (p1 + p2) / (p3 + p4) / (p5 + p6) 
+# Print
+p.all.spp
+
+# Save panel
 ggsave(here::here("plots", "explore", "kmeans_fish.pdf"), 
        width = 12, height = 8, device = cairo_pdf)
 ```
 
 
-### Only sportfish P/A
+#### Clustering: sportfish
 
-Do the clustering:
+Clustering and plots: 
 
-```{r}
-k2s <- kmeans(dfs, centers = 2, nstart = 25)
-k3s <- kmeans(dfs, centers = 3, nstart = 25)
-k4s <- kmeans(dfs, centers = 4, nstart = 25)
-k5s <- kmeans(dfs, centers = 5, nstart = 25)
+```{r fig.align='center', fig.width=12, fig.height=14}
 
-```
+# Clustering
+k2s <- kmeans(pa_sport, centers = 2, nstart = 25)
+k3s <- kmeans(pa_sport, centers = 3, nstart = 25)
+k4s <- kmeans(pa_sport, centers = 4, nstart = 25)
+k5s <- kmeans(pa_sport, centers = 5, nstart = 25)
+k6s <- kmeans(pa_sport, centers = 6, nstart = 25)
+k7s <- kmeans(pa_sport, centers = 7, nstart = 25)
+k8s <- kmeans(pa_sport, centers = 8, nstart = 25)
+k9s <- kmeans(pa_sport, centers = 9, nstart = 25)
 
+# Plots
+p1s <- fviz_cluster(k2s, geom = "point", data = pa_sport) + ggtitle("k = 2")
+p2s <- fviz_cluster(k3s, geom = "point", data = pa_sport) + ggtitle("k = 3")
+p3s <- fviz_cluster(k4s, geom = "point", data = pa_sport) + ggtitle("k = 4")
+p4s <- fviz_cluster(k5s, geom = "point", data = pa_sport) + ggtitle("k = 5")
+p5s <- fviz_cluster(k6s, geom = "point", data = pa_sport) + ggtitle("k = 6")
+p6s <- fviz_cluster(k7s, geom = "point", data = pa_sport) + ggtitle("k = 7")
+p7s <- fviz_cluster(k8s, geom = "point", data = pa_sport) + ggtitle("k = 8")
+p8s <- fviz_cluster(k9s, geom = "point", data = pa_sport) + ggtitle("k = 9")
 
-Plots to compare clusters:
+# Panel
+p.sportfish <- (p1s + p2s) / (p3s + p4s) / (p5s + p6s) / (p7s + p8s) 
+# Print plot
+p.sportfish
 
-```{r plot-k-means-sportfish, fig.align='center', fig.width=12, fig.height=8}
-p1s <- fviz_cluster(k2s, geom = "point", data = dfs) + ggtitle("k = 2")
-p2s <- fviz_cluster(k3s, geom = "point",  data = dfs) + ggtitle("k = 3")
-p3s <- fviz_cluster(k4s, geom = "point",  data = dfs) + ggtitle("k = 4")
-p4s <- fviz_cluster(k5s, geom = "point",  data = dfs) + ggtitle("k = 5")
-
-(p.sportfish <- (p1s + p2s) / (p3s + p4s) )
-
+# Save plot
 ggsave(here::here("plots", "explore", "kmeans_sportfish.pdf"), 
        width = 12, height = 8, device = cairo_pdf)
+
 ```
 
-### Environmental variables
+Elbow method for optimal clusters:
 
-Do the clustering:
+```{r fig.align='center', fig.width=6, fig.height=4}
+# function to compute total within-cluster sum of square 
+wss <- function(k) {
+  kmeans(pa_sport, k, nstart = 10 )$tot.withinss
+}
 
-```{r}
-# filter out reaches with fish data
-dfe <- df_attrbs %>% 
-  filter(reach_id %in% df_fish_pa$reach_id) %>% 
+# Compute and plot wss for k = 1 to k = 15
+k.values <- 1:15
+
+# extract wss for 2-15 clusters
+wss_values <- map_dbl(k.values, wss)
+
+plot(k.values, wss_values,
+       type="b", pch = 19, frame = FALSE, 
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+```
+
+
+## Environmental Data
+
+### Prep data
+
+Filter, remove NAs, and scale data: 
+
+```{r prep-env-data}
+
+# all streams
+dfe1 <- whd_data %>% 
   select(!ends_with("dist")) %>%   # to many NAs
   column_to_rownames("reach_id") %>% 
-  na.omit()
-```
+  na.omit() %>% 
+  scale()
 
-```{r}
-k2e <- kmeans(dfe, centers = 2, nstart = 25)
-k3e <- kmeans(dfe, centers = 3, nstart = 25)
-k4e <- kmeans(dfe, centers = 4, nstart = 25)
-k5e <- kmeans(dfe, centers = 5, nstart = 25)
-
-```
-
-Plots to compare clusters:
-
-```{r plot-k-means-env, fig.align='center', fig.width=12, fig.height=8}
-p1 <- fviz_cluster(k2e, geom = "point", data = dfe) + ggtitle("k = 2")
-p2 <- fviz_cluster(k3e, geom = "point",  data = dfe) + ggtitle("k = 3")
-p3 <- fviz_cluster(k4e, geom = "point",  data = dfe) + ggtitle("k = 4")
-p4 <- fviz_cluster(k5e, geom = "point",  data = dfe) + ggtitle("k = 5")
-
-(p.all.spp <- (p1 + p2) / (p3 + p4) )
-
-ggsave(here::here("plots", "explore", "kmeans_enviro.pdf"), 
-       width = 12, height = 8, device = cairo_pdf)
-```
-
-### Slected Environmental variables
-
-Do the clustering:
-
-```{r}
-# filter out reaches with fish data
-dfe <- df_attrbs %>% 
-  filter(reach_id %in% df_fish_pa$reach_id) %>% 
-  select(reach_id,
-    trw_area, gradient, sinuosity, 
-    w_prcp_ann, trw_prcp_ann, 
-    temp_max_cl_cc, temp_july_cl_cc, temp_summer_cl_cc, 
-    apr_e10_c, aug_e50_c, wy_e50_c, wy_e90_c | contains("temp")
-    ) %>% 
+# stream with fish data
+dfe2 <- whd_data %>% 
+  filter(reach_id %in% df_fish$reach_id) %>%
+  select(!ends_with("dist")) %>%   # to many NAs
   column_to_rownames("reach_id") %>% 
-  na.omit()
+  na.omit() %>% 
+  scale()
+
+# stream with fish data and selected temp/flow metrics
+dfe3 <- whd_data %>% 
+  filter(reach_id %in% df_fish$reach_id) %>%
+  select(reach_id,
+    trw_area, gradient, sinuosity,
+    w_prcp_ann, trw_prcp_ann,
+    temp_max_cl_cc, temp_july_cl_cc, temp_summer_cl_cc,
+    apr_e10_c, aug_e50_c, wy_e50_c, wy_e90_c | contains("temp")
+    ) %>%
+  select(!ends_with("dist")) %>%   # to many NAs
+  column_to_rownames("reach_id") %>% 
+  na.omit() %>% 
+  scale()
+
 ```
+
+
+### PCA 
+
+Compute PCs of environmental data and understand their role in variation. 
+
+#### All covariates
 
 ```{r}
-k2e <- kmeans(dfe, centers = 2, nstart = 25)
-k3e <- kmeans(dfe, centers = 3, nstart = 25)
-k4e <- kmeans(dfe, centers = 4, nstart = 25)
-k5e <- kmeans(dfe, centers = 5, nstart = 25)
-k7e <- kmeans(dfe, centers = 7, nstart = 25)
-k10e <- kmeans(dfe, centers = 10, nstart = 25)
-
-```
-
-Plots to compare clusters:
-
-```{r plot-k-means-env-select, fig.align='center', fig.width=12, fig.height=8}
-p1 <- fviz_cluster(k2e, geom = "point", data = dfe) + ggtitle("k = 2")
-p2 <- fviz_cluster(k3e, geom = "point",  data = dfe) + ggtitle("k = 3")
-p3 <- fviz_cluster(k4e, geom = "point",  data = dfe) + ggtitle("k = 4")
-p4 <- fviz_cluster(k5e, geom = "point",  data = dfe) + ggtitle("k = 5")
-p7 <- fviz_cluster(k7e, geom = "point",  data = dfe) + ggtitle("k = 5")
-p10 <- fviz_cluster(k10e, geom = "point",  data = dfe) + ggtitle("k = 5")
-
-(p.all.spp <- (p1 + p2) / (p3 + p4) / (p7 + p10))
-
-ggsave(here::here("plots", "explore", "kmeans_enviro_select.pdf"), 
-       width = 12, height = 8, device = cairo_pdf)
+# run analysis
+pca_01 <- prcomp(dfe2, center = TRUE, scale. = TRUE)
 ```
 
 
+```{r}
+# Full biplot
+fviz_pca_biplot(pca_01, geom.ind = c("point"))
 
-## Next Steps
+# Variable loadings only
+fviz_pca_var(pca_01, col.var = "black")
+```
 
-* run RF models to identify most important variables predicting spp. P/A in reaches
-* run cluster analysis on stream reaches using important enviro variables
-* run LDA to predict and check classification accuracy
+* Wetlands, water to the left
+* Ag and warm temps to the right
+* Hot max water temps to top left
+* High gradients to bottom right
+* Forests to bottom left
+
+
+### k-means cluster
+
+#### Clustering: all streams
+
+Clustering and plots: 
+
+```{r fig.align='center', fig.width=12, fig.height=8}
+
+# Clustering
+k2e1 <- kmeans(dfe1, centers = 2, nstart = 25)
+k3e1 <- kmeans(dfe1, centers = 3, nstart = 25)
+k4e1 <- kmeans(dfe1, centers = 4, nstart = 25)
+k5e1 <- kmeans(dfe1, centers = 5, nstart = 25)
+
+# Plots
+p1 <- fviz_cluster(k2e1, geom = "point", data = dfe1) + ggtitle("k = 2")
+p2 <- fviz_cluster(k3e1, geom = "point",  data = dfe1) + ggtitle("k = 3")
+p3 <- fviz_cluster(k4e1, geom = "point",  data = dfe1) + ggtitle("k = 4")
+p4 <- fviz_cluster(k5e1, geom = "point",  data = dfe1) + ggtitle("k = 5")
+
+# Panel
+p.env <- (p1 + p2) / (p3 + p4) + plot_annotation(
+  title = 'k-means clustering on reach-level environmental data')
+
+# Print plot
+p.env
+
+# Save plot
+# ggsave(here::here("plots", "explore", "kmeans_enviro.pdf"), 
+#        width = 12, height = 8, device = cairo_pdf)
+```
+
+
+Elbow method for optimal number of clusters:
+
+```{r fig.align='center', fig.width=12, fig.height=8}
+# function to compute total within-cluster sum of square 
+wss <- function(k) {
+  kmeans(dfe1, k, nstart = 10)$tot.withinss
+}
+
+# Compute and plot wss for k = 1 to k = 15
+k.values <- 1:15
+
+# extract wss for 2-15 clusters
+wss_values <- map_dbl(k.values, wss)
+
+plot(k.values, wss_values,
+       type="b", pch = 19, frame = FALSE, 
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+```
+
+There are 2, distinct clusters. Perhaps 4 clusters with high overlap. Potentially up at 11 clusters at finer scales. 
+
+
+
+#### Clustering: streams with fish surveys
+
+Elbow method for optimal number of clusters:
+
+```{r elbow-env-fish, fig.align='center', fig.width=12, fig.height=8}
+# function to compute total within-cluster sum of square 
+wss <- function(k) {
+  kmeans(dfe2, k, nstart = 10)$tot.withinss
+}
+
+# Compute and plot wss for k = 1 to k = 15
+k.values <- 1:25
+
+# extract wss for 2-15 clusters
+wss_values <- map_dbl(k.values, wss)
+
+plot(k.values, wss_values,
+       type="b", pch = 19, frame = FALSE, 
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+```
+
+There are many potential clusters. But diminishing returns begin ~8-10 clusters.  
+
+Clustering and plots: 
+
+```{r clust-env-fish, fig.align='center', fig.width=12, fig.height=8}
+
+# Clustering
+k2e2 <- kmeans(dfe2, centers = 2, nstart = 25)
+k3e2 <- kmeans(dfe2, centers = 3, nstart = 25)
+k4e2 <- kmeans(dfe2, centers = 4, nstart = 25)
+k5e2 <- kmeans(dfe2, centers = 5, nstart = 25)
+k6e2 <- kmeans(dfe2, centers = 6, nstart = 25)
+k7e2 <- kmeans(dfe2, centers = 7, nstart = 25)
+k8e2 <- kmeans(dfe2, centers = 8, nstart = 25)
+k9e2 <- kmeans(dfe2, centers = 9, nstart = 25)
+k12e2 <- kmeans(dfe2, centers = 12, nstart = 25)
+
+# Plots
+p1 <- fviz_cluster(k2e2, geom = "point", data = dfe2) + ggtitle("k = 2")
+p2 <- fviz_cluster(k3e2, geom = "point", data = dfe2) + ggtitle("k = 3")
+p3 <- fviz_cluster(k4e2, geom = "point", data = dfe2) + ggtitle("k = 4")
+p4 <- fviz_cluster(k5e2, geom = "point", data = dfe2) + ggtitle("k = 5")
+p5 <- fviz_cluster(k6e2, geom = "point", data = dfe2) + ggtitle("k = 6")
+p6 <- fviz_cluster(k7e2, geom = "point", data = dfe2) + ggtitle("k = 7")
+p7 <- fviz_cluster(k8e2, geom = "point", data = dfe2) + ggtitle("k = 8")
+p8 <- fviz_cluster(k9e2, geom = "point", data = dfe2) + ggtitle("k = 9")
+
+# Panel 2-5
+p.env1 <- (p1 + p2) / (p3 + p4) 
+p.env1
+# Panel 6-9
+p.env2 <- (p5 + p6) / (p7 + p8)
+p.env2
+
+
+# Save plot
+# ggsave(here::here("plots", "explore", "kmeans_enviro_fish_streams.pdf"), 
+#        width = 12, height = 8, device = cairo_pdf)
+```
+
+There are 3 distinct groups. Adding a fourth starts to add some overlap. The as we add more we break up the streams along that PC1 axis. 
+
+
+Map the clusters:
+```{r}
+
+pdat <- dfe2 %>%
+  as_tibble() %>%
+  mutate(cluster = k12e2$cluster,
+         reach_id = row.names(dfe2)) %>% 
+  relocate(reach_id, .before = trw_area)
+
+
+p.map <- whd_lines %>% 
+  left_join(pdat %>% select(reach_id, cluster), by="reach_id") %>% 
+  filter(!is.na(cluster)) %>% 
+  ggplot() +
+  geom_sf(data=wdnr.gis::wi_poly, color = "black", fill="white") + 
+  geom_sf(data=whd_lines %>% filter(wbic==1179900), color="black") +
+  geom_sf(aes(color = as.factor(cluster)), size=1) +
+  theme_void()
+
+p.map
+
+p.map + p7
+
+```
+
 
 
 

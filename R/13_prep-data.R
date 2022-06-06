@@ -10,7 +10,9 @@ library(tidyverse)
 ## Data ------------------------------------------------------------------------
 
 # WDNR 24k WHD line feature layer
-# whd_lines <- readRDS(here("data", "whd_lines.rds"))
+whd_lines <- readRDS(here("data", "whd_lines.rds")) %>% 
+  sf::st_as_sf() %>% 
+  mutate(reach_id = as.character(reachid))
 
 # WDNR 24k WHD VA stream and watershed attribute data
 whd_data <- 

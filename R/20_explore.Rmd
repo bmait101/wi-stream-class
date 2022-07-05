@@ -10,22 +10,21 @@ editor_options:
 
 ## Objectives / To Do
 
-+ ~~classify/cluster streams by fish community & environmental data~~
++ classify/cluster streams by fish community & environmental data
 * run LDA to predict and check classification accuracy
 + calculate fish metrics among classes = standards / opportunities
 
-
-## Prep 
 
 ```{r setup, include=FALSE}
 ragg_png = function(..., res = 150) {
   ragg::agg_png(..., res = res, units = "in")
 }
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, 
-                      dev = "ragg_png", res = 500, retina = 1)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, 
+                      dev = "ragg_png", res = 500, retina = 1, 
+                      fig.align = 'center')
 ```
 
-```{r prep, warning=FALSE, message=FALSE}
+```{r prep}
 # packages
 library(tidyverse)  # data manipulation
 library(cluster)    # clustering algorithms
@@ -34,15 +33,42 @@ library(patchwork)  # panel plots
 library(vegan)      # community analsyses
 library(pdftools)   # covert pdfs to pngs
 
+options(ggrepel.max.overlaps = Inf)
+
 
 # function to do kmeans analysis on a data given a # of clusters
 f_kmeans <- function(dat, clusters, ...){
   kmeans(x = dat, centers = clusters, nstart = 25)
-}
+  }
 
-# function to pull total within-cluster sum of square 
+# function to get total within-cluster sum of square 
 wss <- function(kmeans_ob) {
   kmeans_ob$tot.withinss
+  }
+  
+f_get_clusters <- function(cluster_ob, ...){
+  cluster_ob$cluster 
+}
+
+# function to plot wss
+f_wss_plot <- function(k, kmeans_ob, ...){
+  # make df
+  pdat <- tibble(
+    clusters = 1:k, 
+    wss = map_dbl(kmeans_ob, wss)
+    ) 
+  # plot
+  p.wss <- pdat %>% 
+    ggplot(aes(clusters, wss)) +
+    geom_point() + 
+    geom_line() + 
+    scale_x_continuous(breaks = seq(0,10,1)) +
+    theme_minimal() + 
+    labs(
+      x="Number of clusters (K)", 
+      y="WSS", 
+      title = "Elbow test for optimal clusters"
+      )
 }
 
 # function to plot kmeans cluster objects
@@ -56,49 +82,46 @@ f_fviz_cluster_plots <- function(dat, kmeans_ob, ...){
     )
 }
 
-```
+# function to plot kmeans cluster on map
+f_plot_maps <- function(stream_clusters, clusters){
+  d1 <- stream_clusters %>% filter(k == clusters)
+  d2 <- whd_lines %>% 
+    left_join(d1, by="reach_id") %>% 
+    filter(!is.na(group))
+  ggplot() +
+  geom_sf(data=wdnr.gis::wi_poly, color = "black", fill="white") + 
+  geom_sf(data=whd_lines %>% filter(wbic==1179900), color="black") +
+  geom_sf(data=d2, aes(color = as.factor(group)), size=1) +
+  theme_void() + 
+  theme(
+    legend.position="none", 
+    plot.margin = unit(c(0, 0, 0, 0), "null")
+    )
+}
 
+```
 
 
 ## Data
 
-```{r read-data, echo=FALSE}
+```{r read-data}
 source(here::here("R", "13_prep-data.R"))  # ~1-2 min load time
 ```
 
-There are two primary datasets: 
+There are two datasets: 
 
-* Fish community data: Catch and effort data for all electrofishing surveys (boom, backpack, barge) done on streams by the WDNR from 1994-2020. Excludes all lake and Mississippi River sites. Data was pulled from the WDNR FMIS on 18 April 2022. 
-* 24k WI Hydrography attribute data: A geodatabase of channel, riparian, and watershed attributes for all stream and lake features in 1:24,000 WI Hydrography database. Available at for download [here](https://www.arcgis.com/home/item.html?id=c4bc634ba115498487174bda137f8de8).
+* **Fish community**: Catch and effort data for all electrofishing surveys (boom, backpack, barge) done on streams by the WDNR from 1994-2020. Excludes all lake and Mississippi River sites. Data was pulled from the WDNR FMIS on 18 April 2022. 
+* **24k WI Hydrography**: A geodatabase of channel, riparian, and watershed attributes for all stream and lake features in 1:24,000 WI Hydrography database. Available at for [download here](https://www.arcgis.com/home/item.html?id=c4bc634ba115498487174bda137f8de8).
 
 
 ## Fish Community
 
-Goal: Partition streams into groups based on reach-level fish species presence-absence data. We do this for two objectives: 
+Partition streams into groups based on reach-level fish species presence-absence data. We do this for two objectives: 
 
-* ecology (the whole fish community)
-* fisheries (primary sportfish species)
+* the whole fish community
+* primary sportfish species (fisheries)
 
-
-### Prep data
-
-We will analyze presence / absence matrices for the fish community. 
-
-```{r compute-pa-matricies}
-
-# All species ------
-pa_all <- 
-  df_fish %>% 
-  group_by(species, reach_id) %>% 
-  summarise(present = sum(fish.count), 
-            .groups = 'drop') %>% 
-  mutate(present = if_else(present >= 1, 1, 0)) %>% 
-  pivot_wider(names_from = "species", values_from = "present", values_fill = 0) %>%
-  column_to_rownames("reach_id")
-
-
-# Sport fish ----
-
+```{r spp-groups}
 # list of sportfish species
 sport.spp <- c(
   "muskellunge", "northern_pike", "walleye", "sauger",
@@ -109,23 +132,77 @@ sport.spp <- c(
     "black_crappie", "bluegill", "green_sunfish", "pumpkinseed", 
     "rock_bass", "yellow_perch"
   )
+
 # list of pan fish species (subset of above)
 pan.spp <- c(
     "black_crappie", "bluegill", "green_sunfish", "pumpkinseed", 
     "rock_bass", "yellow_perch"
   )
+
 # list of trout species  (subset of above)
 trout.spp <- c("brook_trout", "brown_trout", "rainbow_trout")
 
-# P/A for sportfish
+# list of catfish spp (subset of above
+catfish.spp <- c("channel_catfish","flathead_catfish")
+```
+
+### Species prevelance
+
+```{r spp-prevelance, fig.height=16, fig.width=8}
+spp_prev <- df_fish %>% 
+  group_by(species) %>% 
+  summarise(n = n_distinct(survey.seq.no), .groups = "drop") %>%
+  mutate(
+    sport_flag = case_when(
+      species %in% sport.spp ~ "Sportfish", 
+      TRUE ~ "Nongame")) 
+
+spp_prev %>% 
+  ggplot(aes(x = reorder(species, n), y = n, fill = sport_flag)) + 
+  coord_flip() + 
+  geom_bar(stat = "identity") + 
+  geom_text(
+    aes(label=n), 
+    position=position_dodge(width=1), hjust=-.2,
+    color = "grey20", size = 2) +
+  scale_y_continuous(limits = c(0,15500), expand = c(0,0), breaks = seq(0,15000,5000)) + 
+  scale_fill_brewer(palette = "Paired") + 
+  labs(
+    x = "Species common name", 
+    y = "Prevelance (count of survey where present)",
+    fill = "",
+    title = glue::glue("Species (n={n_distinct(df_fish$species)}) prevelance in survey data from 1994 to 2021")) + 
+  theme_classic() +
+  theme(
+    legend.position = c(.7, .9)
+  )
+
+# ggsave(filename = here::here("plots","explore","spp_prevelance.pdf"), 
+#        dpi = 600, width = 8, height = 16, device = cairo_pdf)
+```
+
+```{r pa-matricies}
+# P/a for All species ------
+pa_all <- 
+  df_fish %>% 
+  group_by(species, reach_id) %>% 
+  summarise(present = sum(fish.count), 
+            .groups = 'drop') %>% 
+  mutate(present = if_else(present >= 1, 1, 0)) %>% 
+  pivot_wider(names_from = "species", values_from = "present", values_fill = 0) %>%
+  column_to_rownames("reach_id")
+
+prev_1000 <- spp_prev %>% arrange(desc(n)) %>% slice(1:20) %>% pull(species)
+
+# Filter fish data for spotfish and make P/A matrix
 pa_sport <- 
   df_fish %>% 
   filter(species %in% sport.spp) %>% 
   mutate(
     species = case_when(
-      species %in% c("channel_catfish","flathead_catfish") ~ "catfish",
+      species %in%catfish.spp~ "catfish",
+      species %in% trout.spp ~ "trout",
       species %in% pan.spp ~ "panfish",
-      # species %in% trout.spp ~ "trout",
       TRUE ~ species
   )) %>%
   group_by(species, reach_id) %>% 
@@ -134,156 +211,211 @@ pa_sport <-
   mutate(present = if_else(present >= 1, 1, 0)) %>% 
   pivot_wider(names_from = "species", values_from = "present", values_fill = 0) %>%
   column_to_rownames("reach_id")
-
-# pa_sport_reaches <- row.names(pa_sport)
 ```
 
-### PCA
+<br>
 
-We do a PCA beacuse it can help us interpret the vizualizations from the kmeans analysis. 
+### Principal Components Analysis
 
-```{r pca-fish-all}
-# run analysis
+We do a PCA on the P/A matrix because it will help us interpret the visualizations from the k-means analysis. 
+
+```{r compute-pca-fish, cache=TRUE}
 pca_fish_all <- prcomp(pa_all, center = TRUE, scale. = TRUE)
+pca_fish_sport <- prcomp(pa_sport, center = TRUE, scale. = TRUE)
 ```
 
-
-```{r biplot-fish-all, fig.align='center', fig.width=12, fig.height=8}
+```{r pca-fish-plots, cache=TRUE}
 # Full biplot
 p.pca.fish.all <- 
   fviz_pca_biplot(
     pca_fish_all, 
     geom.ind = c("point"), 
-    title = "PCA - Biplot: Fish P/A All Species"
+    title = "PCA biplot: P/A all species"
     )
-p.pca.fish.all
-```
+
+# Variable loadings only
+# p.pca.fish.all.vl <- fviz_pca_var(pca_fish_all, col.var = "steelblue")
+
+fviz_pca_var(pca_fish_all, col.var = "steelblue")
+ 
+fviz_pca_var(pca_fish_all, col.var = "contrib", 
+   gradient.cols = c("white", "blue", "red"))
+
+fviz_pca_var(pca_fish_all, col.var = "contrib", 
+   gradient.cols = c("white", "blue", "red"),
+   select.var = list(contrib = 25))
+
+p.pca.fish.all.vl <- 
+  fviz_pca_var(pca_fish_all, col.var = "contrib", 
+   gradient.cols = c("white", "blue", "red"),
+   select.var = list(name = sport.spp))
+
+p.pca.fish.all.vl <- 
+  fviz_pca_var(pca_fish_all, col.var = "contrib", 
+   gradient.cols = c("white", "blue", "red"),
+   select.var = list(name = prev_1000))
 
 
-```{r pca-fish-sport}
-# run analysis
-pca_fish_sport <- prcomp(pa_sport, center = TRUE, scale. = TRUE)
-```
-
-
-```{r biplot-fish-sport, fig.align='center', fig.width=12, fig.height=8}
 # Full biplot
 p.pca.fish.sport <- 
   fviz_pca_biplot(
     pca_fish_sport, 
     geom.ind = c("point"), 
-    title = "PCA - Biplot: Fish P/A Sportfish Species"
+    title = "PCA biplot: P/A sportfish species"
     )
-p.pca.fish.sport
+
+# Variable loadings only
+p.pca.fish.sport.vl <- fviz_pca_var(pca_fish_sport, col.var = "steelblue")
+
+
 ```
 
 
-### Clustering: all species
+```{r plot-pca-biplot-fish, cache=TRUE, fig.width=12, fig.height=6}
+p.pca.fish.all | p.pca.fish.sport
+```
 
-Clustering and plots: 
+```{r plot-pca-vl-fish, cache=TRUE, fig.width=14, fig.height=8}
+p.pca.fish.all.vl | p.pca.fish.sport.vl
+```
 
-```{r cluster-fish-all, fig.align='center', fig.width=12, fig.height=16}
+<br>
 
-# Clustering for 1 to 10
+### K-mean Cluster Analysis
+
+```{r compute-kmeans-fish, cache=TRUE}
+# All species
 pa_all_clusters <- seq_along(1:10) %>% map(f_kmeans, dat = pa_all)
-
-# PLots
 pa_all_plots <- map(pa_all_clusters, f_fviz_cluster_plots, dat = pa_all)
+p.wss.fish.all <- f_wss_plot(10, pa_all_clusters) 
 
-# Print plot 2, 4, 6, 8
-panel <- 
-  (pa_all_plots[[2]] + pa_all_plots[[4]]) /
-  (pa_all_plots[[6]] + pa_all_plots[[8]]) /
-  p.pca.fish.all + 
-  plot_layout(heights = c(.5,.5,1))
-
-panel + 
-  plot_annotation(
-    title = "k-means clustering on stream community P/A data (all species)"
-    )
-
-
-# Save
-ggsave(here::here("plots", "explore", "kmeans_fish.pdf"),
-       width = 12, height = 16, device = cairo_pdf)
-```
-
-
-Elbow method for optimal clusters:
-
-```{r elbow-fish-all, fig.align='center', fig.width=6, fig.height=4}
-plot(1:10, map_dbl(pa_all_clusters, wss),
-       type="b", pch = 19, frame = FALSE, 
-       xlab="Number of clusters K",
-       ylab="Total within-clusters sum of squares")
-```
-
-Inflection after 3 groups, then another kind at 8 clusters. 
-
-
-### Clustering: sportfish
-
-Clustering and plots: 
-
-```{r cluster-fish-sport, fig.align='center', fig.width=12, fig.height=12}
-
-# Clustering for 1 to 10
+# Sportfish
 pa_sport_clusters <- seq_along(1:10) %>% map(f_kmeans, dat = pa_sport)
-
-# PLots
 pa_sport_plots <- map(pa_sport_clusters, f_fviz_cluster_plots, dat = pa_sport)
+p.wss.fish.sport <- f_wss_plot(10, pa_sport_clusters)
+```
 
-# Print plot 2, 4, 6, 8
-panel <- 
-  (pa_sport_plots[[2]] + pa_sport_plots[[4]]) /
-  (pa_sport_plots[[6]] + pa_sport_plots[[8]]) /
-  p.pca.fish.sport + 
-  plot_layout(heights = c(.6,.6,1))
+#### Elbow plots for optimal clusters
 
-panel + 
-  plot_annotation(
-    title = "k-means clustering on stream community P/A data (sportfish species)"
-    )
+```{r elbow-fish-panel, fig.height=2, fig.width=8}
+p.wss.fish.all | p.wss.fish.sport
+```
 
-# Save plot
-ggsave(here::here("plots", "explore", "kmeans_sportfish.pdf"),
-       width = 12, height = 8, device = cairo_pdf)
+* The **elbow analyses** suggests optimal grouping for streams based on fish communities is between 2-5 clusters. But there is substantial overlap. For the whole community, there is a good breakpoint at 3 clusters with a steady decline thereafter. For the sportfish communities, there is a good break at 2 groups, then at 4 groups; with little improvement after 6 groups. 
 
+<br>
+
+#### Vizualize clusters: all species (left panels) vs. sportfish (right panels)
+
+```{r plot-clusters-fish-panel, cache=TRUE, fig.width=8, fig.height=10}
+(pa_all_plots[[2]] /
+   pa_all_plots[[3]] /
+   pa_all_plots[[4]] /
+   pa_all_plots[[5]]) | 
+  (pa_sport_plots[[2]] /
+     pa_sport_plots[[3]] /
+     pa_sport_plots[[4]] /
+     pa_sport_plots[[5]])
+```
+
+#### Viz all species clusters
+
+##### 2 clusters
+
+```{r cache=TRUE, fig.width=10, fig.height=5}
+p.pca.fish.all.vl | pa_all_plots[[2]]
 ```
 
 
-Elbow method for optimal clusters:
+##### 3 clusters
 
-```{r elbow-fish-sport, fig.align='center', fig.width=6, fig.height=4}
-plot(1:10, map_dbl(pa_sport_clusters, wss),
-       type="b", pch = 19, frame = FALSE, 
-       xlab="Number of clusters K",
-       ylab="Total within-clusters sum of squares")
+```{r cache=TRUE, fig.width=10, fig.height=5}
+p.pca.fish.all.vl | pa_all_plots[[3]]
 ```
 
 
+##### 4 clusters
 
-## Environmental Data
-
-### Prep data
-
-Inspect / Check for missing data: 
-
-```{r skim-env-data}
-skimr::skim(whd_data)
+```{r cache=TRUE, fig.width=10, fig.height=5}
+p.pca.fish.all.vl | pa_all_plots[[4]]
 ```
 
-Filter, remove NAs, and scale data: 
+
+##### 5 clusters
+
+```{r cache=TRUE, fig.width=10, fig.height=5}
+p.pca.fish.all.vl | pa_all_plots[[5]]
+```
+
+
+#### Vizualize sportfish clusters
+
+##### 2 clusters
+
+```{r cache=TRUE, fig.width=10, fig.height=5}
+p.pca.fish.sport.vl |pa_sport_plots[[2]]
+```
+
+* **2 clusters** breaks out streams along a trout-panfish gradient. When we look at the whole community PCA, this may relate to a lotic vs. lentic gradient, which would also suggest some temperature differences.
+
+##### 3 clusters
+
+```{r cache=TRUE, fig.width=10, fig.height=5}
+p.pca.fish.sport.vl |pa_sport_plots[[3]]
+```
+
+* **3 clusters** starts to break out the streams in the non-trout-stream groups. Perhaps into 1) transitional streams, 2) larger rivers, 3) trout streams. 
+
+##### 4 clusters
+
+```{r cache=TRUE, fig.width=10, fig.height=5}
+p.pca.fish.sport.vl |pa_sport_plots[[4]]
+```
+
+* **4 clusters** looks to partition out a few groups (with overlap)
+  * 1: the bigger river fish (catfish, walleye, sauger and sturgeon), 
+  * 2-3: transitional: pike, largemouth, and panfish streams
+  * 4: trout streams
+
+##### 5 clusters
+
+```{r cache=TRUE, fig.width=10, fig.height=5}
+p.pca.fish.sport.vl |pa_sport_plots[[5]]
+```
+
+* **5 clusters** looks to partition out a few groups (with overlap)
+  * 1: the bigger river fish (catfish, walleye, sauger and sturgeon), 
+  * 2: pike, largemouth, and panfish streams
+  * 3-4: transitional?
+  * 5: trout streams
+
+
+<br>
+
+## Environmental & Climate Data
+
+### Data summary
+
+```{r print-env-data}
+# skimr::skim(whd_data)
+nrow(whd_data)
+names(whd_data)
+```
+
+### Clean data
+
+We will remove NAs, scale data, and make 2 datasets: 
+
+* one with stream that have fish surveys on them
+* one with stream that have fish surveys on them & selected variables
 
 ```{r prep-env-data}
-
 # all data minus the distance measures that have too many NAs
 whd_data_all <- whd_data %>% 
   select(!ends_with("dist")) %>%
   na.omit() %>% 
   mutate(across(-reach_id, scale)) %>% 
   column_to_rownames("reach_id") 
-
 
 # stream with fish data
 whd_data_fish <- whd_data_all %>% 
@@ -296,216 +428,187 @@ whd_data_fish_slct <- whd_data_fish %>%
   select(trw_area, gradient, sinuosity,
     w_prcp_ann, trw_prcp_ann,
     temp_max_cl_cc, temp_july_cl_cc, temp_summer_cl_cc,
-    apr_e10_c, aug_e50_c, wy_e50_c, wy_e90_c | contains("temp")
-    )
-
+    apr_e10_c, aug_e50_c, wy_e50_c, wy_e90_c | contains("temp"))
 ```
 
+<br>
 
-### PCA 
+### Principal Components Analysis
 
-Compute PCs of environmental data and understand their role in variation. 
+Again, we do a PCA on the data because it will help us interpret the visualizations from the k-means analysis. 
 
-#### All streams
-
-```{r pca-whd-all}
+```{r compute-pca-env, cache=TRUE}
 # run analysis
 pca_whd_all <- prcomp(whd_data_all, center = TRUE, scale. = TRUE)
-```
-
-
-```{r biplot-env-all, fig.align='center', fig.width=12, fig.height=8}
-# Full biplot
-fviz_pca_biplot(
-  pca_whd_all, 
-  geom.ind = c("point"), 
-  title = "PCA - Biplot: All streams"
-  )
-```
-
-
-```{r varload-env-all, fig.align='center', fig.width=12, fig.height=8}
-# Variable loadings only
-fviz_pca_var(
-  pca_whd_all, 
-  col.var = "black", 
-  title = "PCA Variable Loadings: All streams",
-  repel = TRUE
-  )
-```
-
-
-#### Streams with fish
-
-```{r pca-whd-fish}
-# run analysis
 pca_whd_fish <- prcomp(whd_data_fish, center = TRUE, scale. = TRUE)
+pca_whd_fish_slct <- prcomp(whd_data_fish_slct, center = TRUE, scale. = TRUE)
 ```
 
-
-```{r biplot-env-fish, fig.align='center', fig.width=12, fig.height=8}
+```{r make-pca-plots-env, cache=TRUE}
 # Full biplot
-fviz_pca_biplot(
+p.pca.whd.fish.bi <- 
+  fviz_pca_biplot(
   pca_whd_fish, 
   geom.ind = c("point"), 
-  title = "PCA - Biplot: Streams with fish surveys"
+  title = "Biplot: Streams with fish surveys"
   )
 
-# Save plot
-ggsave(here::here("plots", "explore", "pca_biplot_env_fish.pdf"),
-       width = 12, height = 8, device = cairo_pdf)
-
-```
-
-
-```{r varload-env-fish, fig.align='center', fig.width=12, fig.height=8}
 # Variable loadings only
-fviz_pca_var(
+p.pca.whd.fish.vl <- 
+  fviz_pca_var(
   pca_whd_fish, 
   col.var = "black", 
-  title = "PCA Variable Loadings: Streams with fish surveys",
+  title = "Variable Loadings: Streams with fish surveys",
+  repel = TRUE
+  )
+
+# Full biplot
+p.pca.whd.fish.slct.bi <- 
+  fviz_pca_biplot(
+  pca_whd_fish_slct, 
+  geom.ind = c("point"), 
+  title = "Biplot: Streams with fish surveys (select variables)"
+  )
+
+# Variable loadings only
+p.pca.whd.fish.slct.vl <- 
+  fviz_pca_var(
+  pca_whd_fish_slct, 
+  col.var = "black", 
+  title = "Variable Loadings: Streams with fish surveys (select variables)",
   repel = TRUE
   )
 ```
 
+```{r pca-whd-plot-panel, fig.width=12, fig.height=10}
+(p.pca.whd.fish.bi / p.pca.whd.fish.slct.bi) |
+  (p.pca.whd.fish.vl / p.pca.whd.fish.slct.vl) 
+```
+
+Describe variation in stream attributes. Any gradients?
 
 
-### k-means cluster
+<br>
 
-#### Clustering: all streams **NOT RUN**
+### K-means Cluster Analysis
 
-Clustering and plots: **NOT RUN**
+```{r compute-kmeans-env, cache=TRUE}
+# All variables
+whd_data_fish_clusters <- 
+  seq_along(1:10) %>% 
+  map(f_kmeans, dat = whd_data_fish)
 
-```{r cluster-whd-all, fig.align='center', fig.width=12, fig.height=12, eval=FALSE}
+whd_data_fish_plots <- 
+  map(whd_data_fish_clusters, f_fviz_cluster_plots, dat = whd_data_fish)
 
-# Clustering for 1 to 10
-whd_data_all_clusters <- seq_along(1:10) %>% map(f_kmeans, dat = whd_data_all)
+p.wss.whd.fish <- 
+  f_wss_plot(10, whd_data_fish_clusters)
 
-# PLots
-whd_data_all_plots <- map(whd_data_all_clusters, f_fviz_cluster_plots, dat = whd_data_all)
 
-# Print plot 2, 4, 6, 8
-(whd_data_all_plots[[2]] + whd_data_all_plots[[4]]) /
-  (whd_data_all_plots[[6]] + whd_data_all_plots[[8]]) + 
-  plot_annotation(
-    title = "k-means clustering on environmental data (all streams)"
-    )
+# Reduced Variables
+whd_data_fishS_clusters <- 
+  seq_along(1:10) %>% 
+  map(f_kmeans, dat = whd_data_fish_slct)
 
-# Save plot
-# ggsave(here::here("plots", "explore", "kmeans_sportfish.pdf"), 
-#        width = 12, height = 8, device = cairo_pdf)
+whd_data_fishS_plots <- 
+  map(whd_data_fishS_clusters, f_fviz_cluster_plots, dat = whd_data_fish_slct)
+
+p.wss.whd.fishS <- 
+  f_wss_plot(10, whd_data_fishS_clusters)
+```
+
+```{r make-cluster-maps, cache=TRUE}
+# All vars
+stream_clusters <- 
+  whd_data_fish_clusters %>% 
+  map(f_get_clusters) %>% 
+  map_df(enframe, name = "reach_id", .id = 'k', value = "group")
+
+
+p.map3 <- f_plot_maps(stream_clusters, 3)
+p.map4 <- f_plot_maps(stream_clusters, 4)
+p.map6 <- f_plot_maps(stream_clusters, 6)
+p.map8 <- f_plot_maps(stream_clusters, 8)
+
+
+# Reduced vars
+stream_clustersS <- 
+  whd_data_fishS_clusters %>% 
+  map(f_get_clusters) %>% 
+  map_df(enframe, name = "reach_id", .id = 'k', value = "group")
+
+
+p.mapS3 <- f_plot_maps(stream_clustersS, 3)
+p.mapS4 <- f_plot_maps(stream_clustersS, 4)
+p.mapS6 <- f_plot_maps(stream_clustersS, 6)
+p.mapS8 <- f_plot_maps(stream_clustersS, 8)
+p.mapS10 <- f_plot_maps(stream_clustersS, 10)
+```
+
+<br>
+
+#### Elbow plots for optimal clusters:
+
+```{r elbow-env-panel, fig.height=2, fig.width=8}
+p.wss.whd.fish | p.wss.whd.fishS 
+```
+
+* The **elbow analyses** looks like a solid breakpoint at 3-4 clusters (sportfish). But still finding reasonable groups at higher resolutions. 
+
+
+#### Cluster vizualizations (all variables)
+
+```{r plot-clusters-all, cache=TRUE, fig.width=8, fig.height=12}
+(whd_data_fish_plots[[3]] / 
+   whd_data_fish_plots[[4]] / 
+   whd_data_fish_plots[[6]] / 
+   whd_data_fish_plots[[8]]) |
+  (p.map3 / p.map4 / p.map6 / p.map8)
+```
+
+
+#### Cluster vizualizations (reduced variables)
+
+```{r plot-clusters-slct, cache=TRUE, fig.width=8, fig.height=12}
+(whd_data_fishS_plots[[3]] / 
+   whd_data_fishS_plots[[4]] / 
+   whd_data_fishS_plots[[6]] / 
+   whd_data_fishS_plots[[8]]) |
+  (p.mapS3 /p.mapS4 / p.mapS6 / p.mapS8)
+
+((whd_data_fishS_plots[[8]]) | (p.mapS8)) 
+
+ggsave(filename = here::here("plots","explore","env_8.pdf"),
+       dpi = 600, width = 10, height = 5, device = cairo_pdf)
 
 ```
 
 
-Elbow method for optimal clusters: **NOT RUN**
+#### Compare: all varibles (left panels) vs. select variables (right panels)
 
-```{r elbow-whd-all, fig.align='center', fig.width=6, fig.height=4, eval=FALSE}
-plot(1:10, map_dbl(whd_data_all_clusters, wss),
-       type="b", pch = 19, frame = FALSE, 
-       xlab="Number of clusters K",
-       ylab="Total within-clusters sum of squares")
+```{r compare-cluster-maps, cache=TRUE, fig.width=8, fig.height=14}
+(p.map3 / p.map4 / p.map6 / p.map8) |
+  (p.mapS3 /p.mapS4 / p.mapS6 / p.mapS8)
+```
+
+<br> 
+
+#### Summary / Interpretations
+
+* things get interesting with using the selected variables vs all variables. Looking at the 8 cluster map comparison, the selected variables look to really get at the heterogeneity of streams within regions. 
+
+```{r, cache=TRUE, fig.width=14, fig.height=5}
+p.pca.whd.fish.slct.vl | (whd_data_fishS_plots[[8]]) | (p.mapS8)
 ```
 
 
-#### Clustering: streams with fish surveys
-
-Clustering and plots:
-
-```{r cluster-whd-fish, fig.align='center', fig.width=12, fig.height=12}
-
-# Clustering for 1 to 10
-whd_data_fish_clusters <- seq_along(1:10) %>% map(f_kmeans, dat = whd_data_fish)
-
-# PLots
-whd_data_fish_plots <- map(whd_data_fish_clusters, f_fviz_cluster_plots, dat = whd_data_fish)
-
-# Print plot 2, 4, 6, 8
-(whd_data_fish_plots[[2]] + whd_data_fish_plots[[4]]) /
-  (whd_data_fish_plots[[6]] + whd_data_fish_plots[[8]]) + 
-  plot_annotation(
-    title = "k-means clustering on environmental data (streams with fish surveys)"
-    )
-
-# Save plot
-# ggsave(here::here("plots", "explore", "kmeans_sportfish.pdf"), 
-#        width = 12, height = 8, device = cairo_pdf)
-
-```
-
-
-Elbow method for optimal clusters:
-
-```{r elbow-whd-fish, fig.align='center', fig.width=6, fig.height=4}
-plot(1:10, map_dbl(whd_data_fish_clusters, wss),
-       type="b", pch = 19, frame = FALSE, 
-       xlab="Number of clusters K",
-       ylab="Total within-clusters sum of squares")
-```
-
-
-Map the clusters (4 vs. 8):
-```{r map-clusters, fig.align='center', fig.width=12, fig.height=10, echo=FALSE}
-
-pdat <- whd_data_fish %>%
-  as_tibble() %>%
-  mutate(cluster = whd_data_fish_clusters[[4]]$cluster,
-         reach_id = row.names(whd_data_fish)) %>% 
-  relocate(reach_id, .before = trw_area)
-
-p.map4 <- whd_lines %>% 
-  left_join(pdat %>% select(reach_id, cluster), by="reach_id") %>% 
-  filter(!is.na(cluster)) %>% 
-  ggplot() +
-  geom_sf(data=wdnr.gis::wi_poly, color = "black", fill="white") + 
-  geom_sf(data=whd_lines %>% filter(wbic==1179900), color="black") +
-  geom_sf(aes(color = as.factor(cluster)), size=1) +
-  theme_void() + 
-  theme(legend.position="none", 
-        plot.margin = unit(c(0, 0, 0, 0), "null"))
-
-
-pdat <- whd_data_fish %>%
-  as_tibble() %>%
-  mutate(cluster = whd_data_fish_clusters[[8]]$cluster,
-         reach_id = row.names(whd_data_fish)) %>% 
-  relocate(reach_id, .before = trw_area)
-
-p.map9 <- whd_lines %>% 
-  left_join(pdat %>% select(reach_id, cluster), by="reach_id") %>% 
-  filter(!is.na(cluster)) %>% 
-  ggplot() +
-  geom_sf(data=wdnr.gis::wi_poly, color = "black", fill="white") + 
-  geom_sf(data=whd_lines %>% filter(wbic==1179900), color="black") +
-  geom_sf(aes(color = as.factor(cluster)), size=1) +
-  theme_void() + 
-  theme(legend.position="none", 
-        plot.margin = unit(c(0, 0, 0, 0), "null"))
-
-# Plot panel
-panel <- 
-  (whd_data_fish_plots[[4]] / whd_data_fish_plots[[8]]) |
-  (p.map4 / p.map9) 
-
-panel + 
-  plot_layout(widths = c(.5, .5)) +
-  plot_annotation(
-    title = "k-means cluster analysis on climate/environemtnal data for WI streams",
-    subtitle = "Clustering done on streams with fish surveys (n=9,526 steams)"
-  )
-
-ggsave(here::here("plots", "explore", "kmeans_env_fish_streams.pdf"),
-       width = 12, height = 10, device = cairo_pdf)
-
-```
-
-
-
+<br> 
 
 *** 
 
-## Convert PDF to PNG 
-```{r convert-pdfs}
+## Session Info
+
+```{r convert-pdfs, include=FALSE, eval=FALSE}
 ## convert PDF to PNG
 path <- here::here("plots", "explore")
 pdfs <- list.files(path, pattern = "*.pdf", recursive = TRUE)
@@ -515,8 +618,6 @@ for(pdf in pdfs) {
               format = "png", dpi = 500)
 }
 ```
-
-## Session Info
 
 ```{r session}
 Sys.time()
